@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
 
   switch (command) {
   case 'S': {
-    if (argc != 4) usage_err(argv);
+    if (argc < 4) usage_err(argv);
 
     s8 key = { .buf = (u8 *) argv[2], .len = strlen(argv[2]), };
     s8 val = { .buf = (u8 *) argv[3], .len = strlen(argv[3]), };
