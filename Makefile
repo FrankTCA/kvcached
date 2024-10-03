@@ -22,3 +22,7 @@ install: build
 deinstall:
 	rm /usr/local/bin/kvcached
 	rm /usr/local/bin/kvcache-client
+
+clean:
+	rm build/kvcache-client
+	rm build/kvcached
