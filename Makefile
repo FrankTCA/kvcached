@@ -5,31 +5,27 @@ prepare-c:
 	CFLAGS="-Wall -Wextra -g -O3"
 
 build-server: prepare-c
-	echo "==> Building server..."
 	cc kvcached.c -o build/kvcached
 
 build-client: prepare-c
-	echo "==> Building client..."
-	cc client.c -o build/kvcache-client
+	cc kvcachecmd.c -o build/kvcachemd
 
 build-controller: prepare-c
-	echo "==> Building controller..."
 	cc kvcachectl.c -o build/kvcachectl
 
 build: build-server build-client build-controller
-	echo "==> All modules built"
 
 install: build
 	install -m 555 build/kvcached /usr/local/bin
-	install -m 555 build/kvcache-client /usr/local/bin
+	install -m 555 build/kvcachecmd /usr/local/bin
 	install -m 555 build/kvcachectl /usr/local/bin
 
 deinstall:
 	rm /usr/local/bin/kvcached
-	rm /usr/local/bin/kvcache-client
+	rm /usr/local/bin/kvcachecmd
 	rm /usr/local/bin/kvcachectl
 
 clean:
-	rm build/kvcache-client
+	rm build/kvcachecmd
 	rm build/kvcached
 	rm build/kvcachectl
