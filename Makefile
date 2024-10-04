@@ -8,7 +8,7 @@ build-server: prepare-c
 	cc kvcached.c -o build/kvcached
 
 build-client: prepare-c
-	cc kvcachecmd.c -o build/kvcachemd
+	cc kvcachecmd.c -o build/kvcachecmd
 
 build-controller: prepare-c
 	cc kvcachectl.c -o build/kvcachectl
