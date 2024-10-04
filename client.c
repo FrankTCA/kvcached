@@ -1,12 +1,6 @@
 #define DS_IMPL
 #include "ds.h"
-
-// Does byte order matter?
-void print_u32_bytes(u32 a) {
-  u8 b[4];
-  memmove(b, &a, sizeof(b));
-  printf("%c%c%c%c", b[3], b[2], b[1], b[0]);
-}
+#include "print_functions.h"
 
 void usage_err(char *argv[]) {
   fprintf(stderr, "Usage: %s 'S|G|D|C' <key> <val>\n", argv[0]);
