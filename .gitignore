@@ -1,2 +1,4 @@
 .idea
-kvcached.old.c
+kvcached
+kvcachecmd
+kvcachectl
