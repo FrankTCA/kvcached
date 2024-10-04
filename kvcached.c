@@ -36,13 +36,13 @@ Map *map_upsert(Arena *perm, Map **m, s8 key) {
   Map *least_deleted = NULL;
 
   for (u64 h = s8_hash(key); *m; h <<= 2) {
-    if (s8_equals(key, (*m)->key)) {
-      return *m;
-    }
+    if (s8_equals(key, (*m)->key)) return *m;
 
     if ((*m)->deleted && least_deleted == NULL) {
       least_deleted = *m;
     }
+
+    printf("%ld\n", h>>62);
 
     m = &(*m)->child[h>>62];
   }
@@ -50,16 +50,16 @@ Map *map_upsert(Arena *perm, Map **m, s8 key) {
   if (!perm) return NULL;
   if (least_deleted != NULL) *m = least_deleted;
   else *m = new(perm, Map, 1);
-  (*m)->key = key;
+  (*m)->key = s8_copy(perm, key);
   return *m;
 }
 
 // TODO: Also clear values to reduce memory usage
 void map_delete(Map **m, s8 key) {
-  Map *new = map_upsert(NULL, m, key);
-  if (new == NULL) return;
-  new->deleted = true;
-  memset(&new, 0, sizeof(Map));
+  Map *d = map_upsert(NULL, m, key);
+  if (d == NULL) return;
+  d->deleted = true;
+  d->key = d->val = (s8) {0};
 }
 
 ssize_t recv_buf(Client c, u8 *buf, ssize_t buf_len) {
@@ -125,13 +125,15 @@ void send_s8(Client c, s8 s) {
 
 void usage_err(char *argv[]) {
   fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+
   exit(1);
 }
 
 int main(int argc, char *argv[]) {
   if (argc != 2) usage_err(argv);
-  
+
   u16 port = atoi(argv[1]);
+  if (port == 0) usage_err(argv);
 
   const int fd = socket(PF_INET, SOCK_STREAM, 0);
   {
@@ -212,8 +214,8 @@ int main(int argc, char *argv[]) {
       printf("Deleted key\n");
     } break;
     case 'C': {
-      free(store.buf);
       map = NULL;
+      free(store.buf);
       store = new_arena(20 * 1024 * 1024); // TODO: Centralize this
       printf("Cleared cache\n");
     } break;
