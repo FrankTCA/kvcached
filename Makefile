@@ -3,6 +3,7 @@ all: build
 prepare-c:
 	set -xe
 	CFLAGS="-Wall -Wextra -g -O3"
+	mkdir -p build
 
 build-server: prepare-c
 	cc kvcached.c -o build/kvcached
@@ -26,6 +27,4 @@ deinstall:
 	rm /usr/local/bin/kvcachectl
 
 clean:
-	rm build/kvcachecmd
-	rm build/kvcached
-	rm build/kvcachectl
+	rm -r build
