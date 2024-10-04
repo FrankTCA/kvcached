@@ -54,11 +54,6 @@ Map *map_upsert(Arena *perm, Map **m, s8 key) {
   return *m;
 }
 
-void usage_err(char *argv[]) {
-  fprintf(stderr, "Usage: %s <port>\n", argv[0]);
-  exit(1);
-}
-
 // TODO: Also clear values to reduce memory usage
 void map_delete(Map **m, s8 key) {
   Map *new = map_upsert(NULL, m, key);
@@ -128,11 +123,14 @@ void send_s8(Client c, s8 s) {
   send(c.sock, s.buf, s.len * sizeof(u8), 0);
 }
 
-int main(int argc, char** argv) {
-  if (argc != 2) {
-    usage_err(argv);
-  }
+void usage_err(char *argv[]) {
+  fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+  exit(1);
+}
 
+int main(int argc, char *argv[]) {
+  if (argc != 2) usage_err(argv);
+  
   u16 port = atoi(argv[1]);
 
   const int fd = socket(PF_INET, SOCK_STREAM, 0);
