@@ -18,3 +18,4 @@ These are the things that need to be done before depolyment.
 - [ ] bus error following creation of new server (is it when sending port and PID to tracking daemon?)
 - [ ] kvcached server breaks when nonexistant key is attempted to be retrieved - needs to return error msg
 - [ ] kvcachectl seems to have trouble doing more than one or two kvcached servers at a time, "bind(3) error: address already in use"
+- [ ] Delete command does not work, results in crash.
