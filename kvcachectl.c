@@ -12,14 +12,6 @@
 
 #define DEFAULT_TRACKING_PORT 32782
 
-enum Protocol_Method {
-  UNDEFINED,
-  SAVE,
-  GET,
-  DELETE,
-  CLEAR
-};
-
 void usage_err(char *argv[]) {
   fprintf(stderr, "usage: %s <start|stop|client> <port> [[S|G|D|C] [args]]\n", argv[0]);
   exit(1);
@@ -83,7 +75,9 @@ void start_server(const char* port) {
     printf("kvcached server started on PID %i\n", the_pid);
     char pid_str[7];
     sprintf(pid_str, "%i", the_pid);
+    printf("Breakpoint before set value.\n");
     set_value(DEFAULT_TRACKING_PORT, strdup(port), pid_str);
+    printf("Breakpoint after set value.\n");
   }
 }
 
@@ -96,9 +90,9 @@ int stop_server(const char* port) {
   return 0;
 }
 
-void run_client(int port, enum Protocol_Method method, int argc, char** argv) {
+void run_client(int port, int argc, char** argv) {
   if (!test_running(port)) server_not_running_err(port);
-  if (method == SAVE) {
+  if (strcmp(argv[3], "S") == 0) {
     if (argc < 5) usage_err(argv);
     char* value = "";
     for (int i = 4; i < argc; i++) {
@@ -108,18 +102,18 @@ void run_client(int port, enum Protocol_Method method, int argc, char** argv) {
     set_value(port, argv[3], value);
     printf("Value set!\n");
     exit(0);
-  } else if (method == GET) {
+  } else if (strcmp(argv[3], "G") == 0) {
     if (argc != 4) usage_err(argv);
     char* value = get_value(port, argv[3]);
     if (value == NULL) val_error();
     printf("%s\n", value);
     exit(0);
-  } else if (method == DELETE) {
+  } else if (strcmp(argv[3], "D") == 0) {
     if (argc != 4) usage_err(argv);
     delete(port, argv[3]);
     printf("Value deleted!\n");
     exit(0);
-  } else if (method == CLEAR) {
+  } else if (strcmp(argv[3], "C") == 0) {
     if (argc != 3) usage_err(argv);
     clear(port);
     printf("Memory cleared!\n");
@@ -129,19 +123,7 @@ void run_client(int port, enum Protocol_Method method, int argc, char** argv) {
 
 void parse_client(int port, int argc, char** argv) {
   if (argc < 3) usage_err(argv);
-
-  enum Protocol_Method method = UNDEFINED;
-  if (strcmp(argv[3], "S")) {
-    method = SAVE;
-  } else if (strcmp(argv[3], "G")) {
-    method = GET;
-  } else if (strcmp(argv[3], "D")) {
-    method = DELETE;
-  } else if (strcmp(argv[3], "C")) {
-    method = CLEAR;
-  }
-
-  run_client(port, method, argc, argv);
+  run_client(port, argc, argv);
 }
 
 int main(int argc, char **argv) {
@@ -153,9 +135,7 @@ int main(int argc, char **argv) {
   if (!test_running(DEFAULT_TRACKING_PORT)) {
     start_server(default_port);
   }
-  printf("Before func switch.\n");
   if (strcmp(argv[1], "start")==0) {
-    printf("Func switch start.\n");
     start_server(port);
   }
   if (strcmp(argv[1], "stop")==0) {

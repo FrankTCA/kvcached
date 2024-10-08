@@ -1,13 +1,18 @@
 #define DS_IMPL
 #include "ds.h"
+#include "print_functions.h"
 
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
 
-#define MB (1 << 20)
-#define KEYVAL_MAX_SIZE 1 // MBs
+#define MB ((1 << 20)*8)
+#define KEYVAL_MAX_SIZE 10 // MBs
+
+#define ERR_RECV "recv(3) error\n"
+#define ERR_PAK_LRG "Error: Packet too large. Ignoring connection.\n"
+
 
 typedef struct {
   int sock;
@@ -69,7 +74,7 @@ ssize_t recv_buf(Client c, u8 *buf, ssize_t buf_len) {
     ssize_t bytes = recv(c.sock, buf + recvd, buf_len - recvd, 0);
 
     if (bytes < 0) {
-      perror("recv(3) error");
+      perror(ERR_RECV);
       exit(1);
     }
 
@@ -95,7 +100,7 @@ s8 recv_s8(Arena *perm, Client c) {
   s8 s = {0};
   s.len = recv_u32(c);
   if (s.len > KEYVAL_MAX_SIZE * MB) {
-    fprintf(stderr, "Error: Packet too large. Ignoring connection.\n");
+    fprintf(stderr, "Error: Packet of %ti size too large. Ignoring connection. Cannot be larger than %i MiBs or %i bytes\n", s.len, KEYVAL_MAX_SIZE, KEYVAL_MAX_SIZE * MB);
     send_s8(c, s8("Error: Key/Value cannot be larger than "
                   strify(KEYVAL_MAX_SIZE)
                   " MiBs\n"));
@@ -191,7 +196,7 @@ int main(int argc, char *argv[]) {
       // printf("\n");
       // s8_print(val);
       // printf("\n");
-      printf("Stored key\n");
+      printf("Stored key %s with value %s\n", key.buf, val.buf);
     } break;
     case 'G': {
       // send_msg(c, s8("SENDKEY\n"));
@@ -202,7 +207,7 @@ int main(int argc, char *argv[]) {
       if (m == NULL) send_s8(c, (s8) {0});
       else send_s8(c, m->val);
 
-      printf("Sent key\n"); // TODO: Make diagnostics better
+      printf("Sent key %s with value %s\n", key.buf, m->val.buf); // TODO: Make diagnostics better
     } break;
     case 'D': {
       // send_msg(c, s8("SENDKEY\n"));
@@ -218,6 +223,9 @@ int main(int argc, char *argv[]) {
       free(store.buf);
       store = new_arena(20 * 1024 * 1024); // TODO: Centralize this
       printf("Cleared cache\n");
+    } break;
+    case 'P': {
+      send_s8(c, s8("PONG"));
     } break;
     default: fprintf(stderr, "Warning: Client sent unrecognized request!\n%d\n", command);
     }

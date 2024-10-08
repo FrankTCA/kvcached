@@ -48,6 +48,10 @@ int main(int argc, char *argv[]) {
     if (argc != 2) usage_err(argv);
     printf("%c", command);
   } break;
+  case 'P': {
+    if (argc != 2) usage_err(argv);
+    printf("%c", command);
+  } break;
   default: assert(!"Unimplemented or unrecognized command");
   }
 
