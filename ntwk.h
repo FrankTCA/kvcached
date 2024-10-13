@@ -19,8 +19,9 @@
 
 typedef struct {
   struct ev_io io;
-  void (*on_recv)(struct ev_loop *l, struct ev_io *io, int r);
+  int (*on_recv)(i32 sock, void *data);
   u16 port;
+  int num_clients;
   void *data;
 } Server;
 
@@ -34,7 +35,8 @@ int send_i64(i32 sock, i64 a);
 int send_msg(i32 sock, s8 str);
 int send_s8(i32 sock, s8 str);
 
-void on_accept(struct ev_loop *loop, struct ev_io *watcher, int revents);
+void on_recv_wrap(struct ev_loop *loop, struct ev_io *io, int revents);
+void on_accept(struct ev_loop *loop, struct ev_io *io, int revents);
 void start_server(Server s);
 
 #endif // NTWK_H
@@ -120,6 +122,21 @@ int send_s8(i32 sock, s8 str) {
   return send_buf(sock, str.buf, str.len * sizeof(u8));
 }
 
+void on_recv_wrap(struct ev_loop *loop, struct ev_io *io, int revents) {
+  if (EV_ERROR & revents) {
+    perror("Invalid libev event");
+    return;
+  }
+
+  Server *s = io->data;
+  if (s->on_recv(io->fd, s->data)) {
+    ev_io_stop(loop, io);
+    s->num_clients -= 1;
+    free(io);
+    return;
+  }
+}
+
 void on_accept(struct ev_loop *loop, struct ev_io *io, int revents) {
   if (EV_ERROR & revents) {
     perror("Invalid libev event");
@@ -134,10 +151,13 @@ void on_accept(struct ev_loop *loop, struct ev_io *io, int revents) {
     return;
   }
 
-  Server s = *((Server *) io);
-  struct ev_io *w_client = malloc(sizeof(struct ev_io));
+  Server *s = (Server *) io;
+  s->num_clients += 1;
 
-  ev_io_init(w_client, s.on_recv, csock, EV_READ);
+  struct ev_io *w_client = malloc(sizeof(struct ev_io));
+  w_client->data = s;
+
+  ev_io_init(w_client, on_recv_wrap, csock, EV_READ);
   ev_io_start(loop, w_client);
 }
 
