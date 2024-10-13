@@ -48,9 +48,13 @@ bool s8_equals(s8 a, s8 b);
 void s8_print(s8 s);
 u64 s8_hash(s8 s);
 
-#ifdef DS_IMPL
-
 #define strify(c) #c
+
+#endif // DS_H
+
+#ifdef DS_IMPL
+#ifndef DS_IMPL_GUARD
+#define DS_IMPL_GUARD
 
 Arena new_arena(ssize cap) {
   return (Arena) { .buf = malloc(cap), .cap = cap, };
@@ -115,6 +119,5 @@ u64 s8_hash(s8 s) {
   return h;
 }
 
-#endif
-
-#endif
+#endif // DS_IMPL_GUARD
+#endif // DS_IMPL
