@@ -37,7 +37,8 @@ typedef struct {
 #define List(T) struct { T *buf; ssize len, cap; }
 
 Arena new_arena(ssize cap);
-#define new(a, T, c) arena_alloc(a, sizeof(T), _Alignof(T), c)
+#define new(a, T, c) ((a) ? arena_alloc(a, sizeof(T), _Alignof(T), c) : \
+                            calloc(c, sizeof(T)))
 void *arena_alloc(Arena *a, ssize size, ssize align, ssize count);
 
 #define s8(lit) (s8){ .buf = (u8 *) lit, .len = arrlen(lit) - 1, }

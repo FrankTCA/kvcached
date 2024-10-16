@@ -13,21 +13,25 @@
 
 #ifndef RECV_MAX_SIZE
 #define RECV_MAX_SIZE 1 // MiBs
-#endif // KEYVAL_MAX_SIZE
+#endif // RECV_MAX_SIZE
 
 #include <ev.h>
 
-typedef struct {
+typedef struct Server Server;
+typedef struct Server {
   struct ev_io io;
-  int (*on_recv)(i32 sock, void *data);
+  int (*on_recv)(i32 sock, Server *s);
+  struct ev_io *(*on_connect)(i32 sock, Server *s);
+  void (*on_disconnect)(i32 sock, Server *s, struct ev_io *cio);
   u16 port;
   int num_clients;
   void *data;
 } Server;
 
-// Status is sticky -- it only changes upon error
+// Status is sticky -- it only changes upon non-continue
 ssize_t recv_buf(i32 sock, u8 *buf, ssize_t buf_len, int *status);
 i64 recv_i64(i32 sock, int *status);
+u8 recv_u8(i32 sock, int *status);
 s8 recv_s8(Arena *perm, i32 sock, int *status);
 
 int send_buf(i32 sock, void *buf, ssize n);
@@ -36,6 +40,7 @@ int send_msg(i32 sock, s8 str);
 int send_s8(i32 sock, s8 str);
 
 void on_recv_wrap(struct ev_loop *loop, struct ev_io *io, int revents);
+void on_connect_wrap(struct ev_loop *loop, struct ev_io *io, int revents);
 void on_accept(struct ev_loop *loop, struct ev_io *io, int revents);
 void start_server(Server s);
 
@@ -77,6 +82,12 @@ i64 recv_i64(i32 sock, int *status) {
          ((i64)buf[1] << 48) | ((i64)buf[0] << 56);
 }
 
+u8 recv_u8(i32 sock, int *status) {
+  u8 ret = 0;
+  recv_buf(sock, &ret, 1, status);
+  return ret;
+}
+
 s8 recv_s8(Arena *perm, i32 sock, int *status) {
   s8 ret = {0};
   ret.len = recv_i64(sock, status);
@@ -113,6 +124,9 @@ int send_i64(i32 sock, i64 a) {
 }
 
 int send_msg(i32 sock, s8 str) {
+  int status = send_i64(sock, -str.len);
+  if (status) return status;
+
   return send_buf(sock, str.buf, str.len * sizeof(u8));
 }
 
@@ -129,22 +143,23 @@ void on_recv_wrap(struct ev_loop *loop, struct ev_io *io, int revents) {
   }
 
   Server *s = io->data;
-  if (s->on_recv(io->fd, s->data)) {
+  if (s->on_recv(io->fd, s)) {
     ev_io_stop(loop, io);
     s->num_clients -= 1;
-    free(io);
+    if (s->on_disconnect) s->on_disconnect(io->fd, s, io);
+    else free(io);
     return;
   }
 }
 
-void on_accept(struct ev_loop *loop, struct ev_io *io, int revents) {
+void on_connect_wrap(struct ev_loop *loop, struct ev_io *io, int revents) {
   if (EV_ERROR & revents) {
     perror("Invalid libev event");
     return;
   }
 
-  struct sockaddr_in caddr;
-  socklen_t clen;
+  struct sockaddr_in caddr = {0};
+  socklen_t clen = sizeof(caddr);
   i32 csock = accept(io->fd, (struct sockaddr *) &caddr, &clen);
   if (csock < 0) {
     perror("accept(3) error");
@@ -154,7 +169,10 @@ void on_accept(struct ev_loop *loop, struct ev_io *io, int revents) {
   Server *s = (Server *) io;
   s->num_clients += 1;
 
-  struct ev_io *w_client = malloc(sizeof(struct ev_io));
+  struct ev_io *w_client = s->on_connect ?
+                           s->on_connect(csock, s) :
+                           malloc(sizeof(struct ev_io));
+
   w_client->data = s;
 
   ev_io_init(w_client, on_recv_wrap, csock, EV_READ);
@@ -189,7 +207,7 @@ void start_server(Server s) {
   }
 
   struct ev_loop *loop = ev_default_loop(0);
-  ev_io_init(&s.io, on_accept, sock, EV_READ);
+  ev_io_init(&s.io, on_connect_wrap, sock, EV_READ);
   ev_io_start(loop, &s.io);
 
   while (1) {

@@ -10,7 +10,7 @@ typedef struct {
 } ArgParser;
 
 void usage_err(ArgParser a) {
-  fprintf(stderr, "Usage: %s <port> ", a.argv[0]);
+  fprintf(stderr, "Usage: %s ", a.argv[0]);
   s8_print(a.extra_usage);
   printf("\n");
   exit(1);
@@ -32,17 +32,16 @@ void no_more_args(ArgParser a) {
 }
 
 int main(int argc, char *argv[]) {
-  ArgParser argp = { argc, argv, 1, };
+  ArgParser argp = { .argc = argc, .argv = argv, .i = 1, };
 
-  u16 port;
   u8 command;
   {
     argp.extra_usage = s8("'S|G|D|C' ...");
-    s8 p = get_next_arg(&argp);
+    // s8 p = get_next_arg(&argp);
     s8 c = get_next_arg(&argp);
     if (c.len != 1) usage_err(argp);
 
-    port = atoi(p.buf);
+    // port = atoi(p.buf);
     command = c.buf[0];
   }
 
@@ -54,9 +53,9 @@ int main(int argc, char *argv[]) {
     no_more_args(argp);
 
     printf("%c", command);
-    print_u32_bytes(key.len);
+    print_i64_bytes(key.len);
     s8_print(key);
-    print_u32_bytes(val.len);
+    print_i64_bytes(val.len);
     s8_print(val);
   } break;
   case 'G': {
@@ -65,7 +64,7 @@ int main(int argc, char *argv[]) {
     no_more_args(argp);
 
     printf("%c", command);
-    print_u32_bytes(key.len);
+    print_i64_bytes(key.len);
     s8_print(key);
   } break;
   case 'D': {
@@ -74,7 +73,7 @@ int main(int argc, char *argv[]) {
     no_more_args(argp);
 
     printf("%c", command);
-    print_u32_bytes(key.len);
+    print_i64_bytes(key.len);
     s8_print(key);
   } break;
   case 'C': {

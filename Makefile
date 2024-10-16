@@ -1,13 +1,13 @@
 all: build
 
-CFLAGS = -Wall -Wextra -ggdb -O3
+CFLAGS = -Wall -Wextra -ggdb -O3 -Wno-pointer-sign
 
 prepare-c:
 	set -xe
 	mkdir -p build
 
 build-server: prepare-c
-	cc $(CFLAGS) kvcached.c -o build/kvcached
+	cc $(CFLAGS) kvcached.c -o build/kvcached -lev
 
 build-client: prepare-c
 	cc $(CFLAGS) kvcachecmd.c -o build/kvcachecmd
@@ -15,11 +15,7 @@ build-client: prepare-c
 build-controller: prepare-c
 	cc $(CFLAGS) kvcachectl.c -o build/kvcachectl
 
-build-evex: prepare-c
-	cc $(CFLAGS) evex.c -o build/evex -lev
-
-# build: build-server build-client build-controller build-evex
-build: build-evex
+build: build-server build-client
 
 install: build
 	install -m 555 build/kvcached /usr/local/bin
