@@ -36,7 +36,7 @@ s8 recv_s8(Arena *perm, i32 sock, int *status);
 
 int send_buf(i32 sock, void *buf, ssize n);
 int send_i64(i32 sock, i64 a);
-int send_msg(i32 sock, s8 str);
+int send_err(i32 sock, s8 str);
 int send_s8(i32 sock, s8 str);
 
 void on_recv_wrap(struct ev_loop *loop, struct ev_io *io, int revents);
@@ -91,13 +91,16 @@ u8 recv_u8(i32 sock, int *status) {
 s8 recv_s8(Arena *perm, i32 sock, int *status) {
   s8 ret = {0};
   ret.len = recv_i64(sock, status);
-  if (*status) return ret; // TODO: Should this indicate that it failed here?
+  if (*status) return ret; // TODO: Should this indicate that it failed at this location?
+
+  if (ret.len < 0) ret.len *= -1;
 
   if (ret.len > RECV_MAX_SIZE * MB) {
-    fprintf(stderr, "Error: Packet too large. Ignoring connection.\n");
-    send_s8(sock, s8("Error: Key/Value cannot be larger than "
-                  strify(RECV_MAX_SIZE)
-                  " MiBs\n"));
+    fprintf(stderr, "Error: Packet too large (%ld bytes). "
+                    "Ignoring connection.\n", ret.len);
+    send_s8(sock, s8("Error: Packet cannot be larger than "
+                     strify(RECV_MAX_SIZE)
+                     " MiBs.\n"));
     close(sock);
     *status = -1;
     return ret;
@@ -119,11 +122,18 @@ int send_buf(i32 sock, void *buf, ssize n) {
 
 int send_i64(i32 sock, i64 a) {
   u8 buf[8];
-  memmove(buf, &a, sizeof(buf));
+  buf[7] = (a & 0x00000000000000ff);
+  buf[6] = (a & 0x000000000000ff00) >> 8;
+  buf[5] = (a & 0x0000000000ff0000) >> 16;
+  buf[4] = (a & 0x00000000ff000000) >> 24;
+  buf[3] = (a & 0x000000ff00000000) >> 32;
+  buf[2] = (a & 0x0000ff0000000000) >> 40;
+  buf[1] = (a & 0x00ff000000000000) >> 48;
+  buf[0] = (a & 0xff00000000000000) >> 56;
   return send_buf(sock, buf, sizeof(buf));
 }
 
-int send_msg(i32 sock, s8 str) {
+int send_err(i32 sock, s8 str) {
   int status = send_i64(sock, -str.len);
   if (status) return status;
 
@@ -199,7 +209,7 @@ void start_server(Server s) {
 
   socklen_t addr_len = sizeof(addr);
   getsockname(sock, (struct sockaddr *) &addr, &addr_len);
-  printf("Server is on port %d\n", (int) ntohs(addr.sin_port));
+  printf("Server is on port %d.\n", (int) ntohs(addr.sin_port));
 
   if (listen(sock, 1)) {
     perror("listen(3) error");

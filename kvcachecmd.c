@@ -1,6 +1,13 @@
 #define DS_IMPL
 #include "ds.h"
-#include "print_functions.h"
+
+#define NTWK_IMPL
+#include "ntwk.h"
+
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
 
 typedef struct {
   int argc;
@@ -10,9 +17,9 @@ typedef struct {
 } ArgParser;
 
 void usage_err(ArgParser a) {
-  fprintf(stderr, "Usage: %s ", a.argv[0]);
-  s8_print(a.extra_usage);
-  printf("\n");
+  fprintf(stderr, "Usage: %s <port> ", a.argv[0]);
+  s8_fprint(stderr, a.extra_usage);
+  fprintf(stderr, "\n");
   exit(1);
 }
 
@@ -31,19 +38,42 @@ void no_more_args(ArgParser a) {
   if (a.argc > a.i) usage_err(a);
 }
 
+int connect_to_localhost(u16 port) {
+  int sock = socket(PF_INET, SOCK_STREAM, 0);
+
+  struct sockaddr_in addr = {0};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((short) port);
+
+  char addrstr[NI_MAXHOST + NI_MAXSERV + 1];
+  snprintf(addrstr, sizeof(addrstr), "127.0.0.1:%d", port);
+
+  inet_pton(AF_INET, addrstr, &addr.sin_addr);
+
+  if (connect(sock, (struct sockaddr*) &addr, sizeof(addr))) {
+    perror("connect(3) error");
+    exit(1);
+  }
+
+  return sock;
+}
+
 int main(int argc, char *argv[]) {
   ArgParser argp = { .argc = argc, .argv = argv, .i = 1, };
 
   u8 command;
+  u16 port;
   {
     argp.extra_usage = s8("'S|G|D|C' ...");
-    // s8 p = get_next_arg(&argp);
+    s8 p = get_next_arg(&argp);
     s8 c = get_next_arg(&argp);
     if (c.len != 1) usage_err(argp);
 
-    // port = atoi(p.buf);
+    port = atoi(p.buf);
     command = c.buf[0];
   }
+
+  int sock;
 
   switch (command) {
   case 'S': {
@@ -52,38 +82,50 @@ int main(int argc, char *argv[]) {
     s8 val = get_next_arg(&argp);
     no_more_args(argp);
 
-    printf("%c", command);
-    print_i64_bytes(key.len);
-    s8_print(key);
-    print_i64_bytes(val.len);
-    s8_print(val);
+    sock = connect_to_localhost(port);
+    send_buf(sock, &command, sizeof(command));
+    send_s8(sock, key);
+    send_s8(sock, val);
   } break;
   case 'G': {
     argp.extra_usage = s8("G <key>");
     s8 key = get_next_arg(&argp);
     no_more_args(argp);
 
-    printf("%c", command);
-    print_i64_bytes(key.len);
-    s8_print(key);
+    sock = connect_to_localhost(port);
+    send_buf(sock, &command, sizeof(command));
+    send_s8(sock, key);
   } break;
   case 'D': {
     argp.extra_usage = s8("D <key>");
     s8 key = get_next_arg(&argp);
     no_more_args(argp);
 
-    printf("%c", command);
-    print_i64_bytes(key.len);
-    s8_print(key);
+    sock = connect_to_localhost(port);
+    send_buf(sock, &command, sizeof(command));
+    send_s8(sock, key);
   } break;
   case 'C': {
     argp.extra_usage = s8("C");
     no_more_args(argp);
 
-    printf("%c", command);
+    sock = connect_to_localhost(port);
+    send_buf(sock, &command, sizeof(command));
   } break;
-  default: assert(!"Unimplemented or unrecognized command");
+  default: {
+    fprintf(stderr, "Error: Unrecognized command.\n");
+    usage_err(argp);
   }
+  }
+
+  int status = 0;
+  s8 msg = recv_s8(NULL, sock, &status);
+  if (status != 0) {
+    fprintf(stderr, "Error: Error when receiving server response.\n");
+    exit(1);
+  }
+  if (msg.len < 0) s8_fprint(stderr, msg);
+  else s8_print(msg);
 
   return 0;
 }

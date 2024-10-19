@@ -111,6 +111,12 @@ void s8_print(s8 s) {
   }
 }
 
+void s8_fprint(FILE *restrict stream, s8 s) {
+  for (ssize i = 0; i < s.len; i++) {
+    fprintf(stream, "%c", s.buf[i]);
+  }
+}
+
 u64 s8_hash(s8 s) {
   u64 h = 0x100;
   for (ssize i = 0; i < s.len; i++) {

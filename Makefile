@@ -10,7 +10,7 @@ build-server: prepare-c
 	cc $(CFLAGS) kvcached.c -o build/kvcached -lev
 
 build-client: prepare-c
-	cc $(CFLAGS) kvcachecmd.c -o build/kvcachecmd
+	cc $(CFLAGS) kvcachecmd.c -o build/kvcachecmd -lev
 
 build-controller: prepare-c
 	cc $(CFLAGS) kvcachectl.c -o build/kvcachectl
