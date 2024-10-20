@@ -91,11 +91,11 @@ s8 recv_s8(Arena *perm, i32 sock, int *status) {
   ret.len = recv_i64(sock, status);
   if (*status) return ret; // TODO: Should this indicate that it failed at this location?
 
-  if (ret.len < 0) ret.len *= -1;
+  ssize ulen = ret.len > 0 ? ret.len : -ret.len;
 
-  if (ret.len > RECV_MAX_SIZE) {
+  if (ulen > RECV_MAX_SIZE) {
     fprintf(stderr, "Error: Packet too large (%ld bytes). "
-                    "Ignoring connection.\n", ret.len);
+                    "Ignoring connection.\n", ulen);
     send_s8(sock, s8("Error: Packet cannot be larger than "
                      strify(RECV_MAX_SIZE) " bytes.\n"));
     close(sock);
@@ -103,8 +103,9 @@ s8 recv_s8(Arena *perm, i32 sock, int *status) {
     return ret;
   }
 
-  ret.buf = new(perm, u8, ret.len);
-  recv_buf(sock, ret.buf, ret.len, status);
+  ret.buf = new(perm, u8, ulen);
+  recv_buf(sock, ret.buf, ulen, status);
+
   return ret;
 }
 

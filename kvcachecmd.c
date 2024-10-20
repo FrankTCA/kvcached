@@ -131,7 +131,7 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
   if (msg.len < 0) {
-    fprintf(stderr, "Hi\n");
+    msg.len *= -1;
     s8_fprint(stderr, msg);
   }
   else s8_print(msg);
