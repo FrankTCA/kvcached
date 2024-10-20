@@ -13,10 +13,12 @@ typedef struct {
   int argc;
   char **argv;
   int i;
+  s8 extra_usage;
 } ArgParser;
 
 void usage_err(ArgParser a) {
-  fprintf(stderr, "Usage: %s <port> <command> <paramaters>", a.argv[0]);
+  fprintf(stderr, "Usage: %s <port> ", a.argv[0]);
+  s8_fprint(stderr, a.extra_usage);
   fprintf(stderr, "\n");
   fprintf(stderr, "Try '%s --help' for more information.\n", a.argv[0]);
   exit(1);
@@ -61,6 +63,7 @@ int main(int argc, char *argv[]) {
   Arena scratch = new_arena(20 * GiB);
 
   ArgParser argp = { .argc = argc, .argv = argv, .i = 1, };
+  argp.extra_usage = s8("<command> <paramaters>");
 
   u8 command;
   u16 port;
@@ -77,6 +80,8 @@ int main(int argc, char *argv[]) {
 
   switch (command) {
   case 'S': {
+    argp.extra_usage = s8("S <key> [value]");
+
     s8 key = get_next_arg(&argp);
 
     s8 val = {0};
@@ -97,6 +102,8 @@ int main(int argc, char *argv[]) {
     send_s8(sock, val);
   } break;
   case 'G': {
+    argp.extra_usage = s8("G <key>");
+
     s8 key = get_next_arg(&argp);
     no_more_args(argp);
 
@@ -105,6 +112,8 @@ int main(int argc, char *argv[]) {
     send_s8(sock, key);
   } break;
   case 'D': {
+    argp.extra_usage = s8("D <key>");
+
     s8 key = get_next_arg(&argp);
     no_more_args(argp);
 
@@ -113,6 +122,8 @@ int main(int argc, char *argv[]) {
     send_s8(sock, key);
   } break;
   case 'C': {
+    argp.extra_usage = s8("C");
+
     no_more_args(argp);
 
     sock = connect_to_localhost(port);
