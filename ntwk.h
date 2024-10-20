@@ -9,10 +9,8 @@
 #include <netdb.h>
 #include <unistd.h>
 
-#define MB (1 << 20)
-
 #ifndef RECV_MAX_SIZE
-#define RECV_MAX_SIZE 1 // MiBs
+#define RECV_MAX_SIZE (1 * GiB) // bytes
 #endif // RECV_MAX_SIZE
 
 #include <ev.h>
@@ -95,12 +93,11 @@ s8 recv_s8(Arena *perm, i32 sock, int *status) {
 
   if (ret.len < 0) ret.len *= -1;
 
-  if (ret.len > RECV_MAX_SIZE * MB) {
+  if (ret.len > RECV_MAX_SIZE) {
     fprintf(stderr, "Error: Packet too large (%ld bytes). "
                     "Ignoring connection.\n", ret.len);
     send_s8(sock, s8("Error: Packet cannot be larger than "
-                     strify(RECV_MAX_SIZE)
-                     " MiBs.\n"));
+                     strify(RECV_MAX_SIZE) " bytes.\n"));
     close(sock);
     *status = -1;
     return ret;

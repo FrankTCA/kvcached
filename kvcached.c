@@ -151,7 +151,7 @@ int main(int argc, char *argv[]) {
   if (argc != 2) usage_err(argv);
 
   Context ctx = {
-    .scratch = new_arena(20 * MB),
+    .scratch = new_arena(20 * GiB),
   };
 
   Server s = {

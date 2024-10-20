@@ -13,13 +13,12 @@ typedef struct {
   int argc;
   char **argv;
   int i;
-  s8 extra_usage;
 } ArgParser;
 
 void usage_err(ArgParser a) {
-  fprintf(stderr, "Usage: %s <port> ", a.argv[0]);
-  s8_fprint(stderr, a.extra_usage);
+  fprintf(stderr, "Usage: %s <port> <command> <paramaters>", a.argv[0]);
   fprintf(stderr, "\n");
+  fprintf(stderr, "Try '%s --help' for more information.\n", a.argv[0]);
   exit(1);
 }
 
@@ -59,12 +58,13 @@ int connect_to_localhost(u16 port) {
 }
 
 int main(int argc, char *argv[]) {
+  Arena scratch = new_arena(20 * GiB);
+
   ArgParser argp = { .argc = argc, .argv = argv, .i = 1, };
 
   u8 command;
   u16 port;
   {
-    argp.extra_usage = s8("'S|G|D|C' ...");
     s8 p = get_next_arg(&argp);
     s8 c = get_next_arg(&argp);
     if (c.len != 1) usage_err(argp);
@@ -77,9 +77,18 @@ int main(int argc, char *argv[]) {
 
   switch (command) {
   case 'S': {
-    argp.extra_usage = s8("S <key> <val>");
     s8 key = get_next_arg(&argp);
-    s8 val = get_next_arg(&argp);
+
+    s8 val = {0};
+    if (argp.i == argp.argc) {
+      val = s8_copy(&scratch, val);
+      u8 ch = 0;
+      while (read(STDIN_FILENO, &ch, 1)) {
+        s8_modcat(&scratch, &val, (s8) { .len = 1, .buf = &ch, });
+      }
+    }
+    else val = get_next_arg(&argp);
+
     no_more_args(argp);
 
     sock = connect_to_localhost(port);
@@ -88,7 +97,6 @@ int main(int argc, char *argv[]) {
     send_s8(sock, val);
   } break;
   case 'G': {
-    argp.extra_usage = s8("G <key>");
     s8 key = get_next_arg(&argp);
     no_more_args(argp);
 
@@ -97,7 +105,6 @@ int main(int argc, char *argv[]) {
     send_s8(sock, key);
   } break;
   case 'D': {
-    argp.extra_usage = s8("D <key>");
     s8 key = get_next_arg(&argp);
     no_more_args(argp);
 
@@ -106,7 +113,6 @@ int main(int argc, char *argv[]) {
     send_s8(sock, key);
   } break;
   case 'C': {
-    argp.extra_usage = s8("C");
     no_more_args(argp);
 
     sock = connect_to_localhost(port);
@@ -124,7 +130,10 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Error: Error when receiving server response.\n");
     exit(1);
   }
-  if (msg.len < 0) s8_fprint(stderr, msg);
+  if (msg.len < 0) {
+    fprintf(stderr, "Hi\n");
+    s8_fprint(stderr, msg);
+  }
   else s8_print(msg);
 
   return 0;

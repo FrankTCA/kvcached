@@ -23,6 +23,10 @@ typedef double f64;
 typedef ptrdiff_t ssize;
 
 #define arrlen(arr) (ssize) (sizeof(arr)/sizeof(arr[0]))
+#define strify(c) #c
+#define KiB (ssize) (1 << 10)
+#define MiB (ssize) (1 << 20)
+#define GiB (ssize) (1 << 30)
 
 typedef struct {
   u8 *buf;
@@ -42,14 +46,13 @@ Arena new_arena(ssize cap);
 void *arena_alloc(Arena *a, ssize size, ssize align, ssize count);
 
 #define s8(lit) (s8){ .buf = (u8 *) lit, .len = arrlen(lit) - 1, }
+
 s8 s8_copy(Arena *perm, s8 s);
 void s8_modcat(Arena *perm, s8 *a, s8 b);
 s8 s8_newcat(Arena *perm, s8 a, s8 b);
 bool s8_equals(s8 a, s8 b);
 void s8_print(s8 s);
 u64 s8_hash(s8 s);
-
-#define strify(c) #c
 
 #endif // DS_H
 
