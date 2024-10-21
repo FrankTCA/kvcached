@@ -6,11 +6,14 @@ prepare-c:
 	set -xe
 	mkdir -p build
 
-build-server: prepare-c
-	cc $(CFLAGS) kvcached.c -o build/kvcached -lev
+compile-libev:
+	./compile-libev.sh
 
-build-client: prepare-c
-	cc $(CFLAGS) kvcachecmd.c -o build/kvcachecmd -lev
+build-server: prepare-c compile-libev
+	cc $(CFLAGS) -static kvcached.c -o build/kvcached lib/libev/.libs/libev.la -lev
+
+build-client: prepare-c compile-libev
+	cc $(CFLAGS) -static kvcachecmd.c -o build/kvcachecmd lib/libev/.libs/libev.la -lev
 
 build-controller: prepare-c
 	cc $(CFLAGS) kvcachectl.c -o build/kvcachectl
