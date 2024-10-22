@@ -12,7 +12,7 @@
 #define RECV_MAX_SIZE (1 * GiB) // bytes
 #endif // RECV_MAX_SIZE
 
-#include <ev.h>
+#include "third_party/libev/ev.h"
 
 typedef struct Server Server;
 struct Server {
