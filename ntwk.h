@@ -1,7 +1,6 @@
 #ifndef NTWK_H
 #define NTWK_H
 
-#define DS_IMPL
 #include "ds.h"
 
 #include <arpa/inet.h>
@@ -16,7 +15,7 @@
 #include <ev.h>
 
 typedef struct Server Server;
-typedef struct Server {
+struct Server {
   struct ev_io io;
   int (*on_recv)(i32 sock, Server *s);
   struct ev_io *(*on_connect)(i32 sock, Server *s);
@@ -24,7 +23,7 @@ typedef struct Server {
   u16 port;
   int num_clients;
   void *data;
-} Server;
+};
 
 // Status is sticky -- it only changes upon non-continue
 ssize_t recv_buf(i32 sock, u8 *buf, ssize_t buf_len, int *status);
@@ -47,6 +46,9 @@ void start_server(Server s);
 #ifdef NTWK_IMPL
 #ifndef NTWK_IMPL_GUARD
 #define NTWK_IMPL_GUARD
+
+#define DS_IMPL
+#include "ds.h"
 
 ssize_t recv_buf(i32 sock, u8 *buf, ssize_t buf_len, int *status) {
   ssize_t recvd = 0;
@@ -231,5 +233,5 @@ void start_server(Server s) {
 //   return ret;
 // }
 
-#endif // DS_IMPL_GUARD
-#endif // DS_IMPL
+#endif // NTWK_IMPL_GUARD
+#endif // NTWK_IMPL

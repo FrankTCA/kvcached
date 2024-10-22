@@ -1,3 +1,0 @@
-[submodule "lib/libev"]
-	path = lib/libev
-	url = https://github.com/FrankTCA/libev

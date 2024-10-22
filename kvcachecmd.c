@@ -4,17 +4,13 @@
 #define NTWK_IMPL
 #include "ntwk.h"
 
+#define ARGP_IMPL
+#include "argp.h"
+
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
-
-typedef struct {
-  int argc;
-  char **argv;
-  int i;
-  s8 extra_usage;
-} ArgParser;
 
 void usage_err(ArgParser a) {
   fprintf(stderr, "Usage: %s <port> ", a.argv[0]);
@@ -22,21 +18,6 @@ void usage_err(ArgParser a) {
   fprintf(stderr, "\n");
   fprintf(stderr, "Try '%s --help' for more information.\n", a.argv[0]);
   exit(1);
-}
-
-s8 get_next_arg(ArgParser *a) {
-  if (a->i >= a->argc) usage_err(*a);
-
-  s8 ret = { .buf = a->argv[a->i], };
-  ret.len = strlen(ret.buf);
-
-  a->i += 1;
-
-  return ret;
-}
-
-void no_more_args(ArgParser a) {
-  if (a.argc > a.i) usage_err(a);
 }
 
 int connect_to_localhost(u16 port) {
@@ -62,15 +43,19 @@ int connect_to_localhost(u16 port) {
 int main(int argc, char *argv[]) {
   Arena scratch = new_arena(20 * GiB);
 
-  ArgParser argp = { .argc = argc, .argv = argv, .i = 1, };
-  argp.extra_usage = s8("<command> <paramaters>");
+  ArgParser argp = {
+    .argc = argc, .argv = argv,
+    .i = 1,
+    .extra_usage = s8("<command> <parameters>"),
+    .usage_err = usage_err,
+  };
 
   u8 command;
   u16 port;
   {
     s8 p = get_next_arg(&argp);
     s8 c = get_next_arg(&argp);
-    if (c.len != 1) usage_err(argp);
+    if (c.len != 1) argp.usage_err(argp);
 
     port = atoi(p.buf);
     command = c.buf[0];

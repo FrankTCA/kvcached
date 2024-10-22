@@ -1,6 +1,7 @@
 all: build
 
 CFLAGS = -Wall -Wextra -ggdb -O3 -Wno-pointer-sign
+LIBEV = third_party/libev/ev.o
 
 prepare-c:
 	set -xe
@@ -10,10 +11,10 @@ compile-libev:
 	./compile-libev.sh
 
 build-server: prepare-c compile-libev
-	cc $(CFLAGS) -static kvcached.c -o build/kvcached lib/libev/.libs/libev.la -lev
+	cc $(CFLAGS) kvcached.c -o build/kvcached $(LIBEV)
 
 build-client: prepare-c compile-libev
-	cc $(CFLAGS) -static kvcachecmd.c -o build/kvcachecmd lib/libev/.libs/libev.la -lev
+	cc $(CFLAGS) kvcachecmd.c -o build/kvcachecmd $(LIBEV)
 
 build-controller: prepare-c
 	cc $(CFLAGS) kvcachectl.c -o build/kvcachectl
