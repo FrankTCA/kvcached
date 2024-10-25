@@ -1,7 +1,7 @@
 all: build
 
 CFLAGS = -Wall -Wextra -ggdb -O3 -Wno-pointer-sign -isystem third_party
-LIBEV = third_party/libev/ev.o
+LIBEV = third_party/libev
 CC = gcc
 
 all:
@@ -10,16 +10,16 @@ all:
 
 configure:
 	git submodule update --init --recursive
-	./third_party/libev/configure --enable-static
+	cd $(LIBEV) && ./configure --enable-static
 
 compile-libev:
-	cd third_party/libev/ && make
+	cd $(LIBEV) && make
 
 build-server: compile-libev
-	$(CC) $(CFLAGS) kvcached.c -o build/kvcached $(LIBEV)
+	$(CC) $(CFLAGS) kvcached.c -o build/kvcached $(LIBEV)/ev.o
 
 build-client: compile-libev
-	$(CC) $(CFLAGS) kvcachecmd.c -o build/kvcachecmd $(LIBEV)
+	$(CC) $(CFLAGS) kvcachecmd.c -o build/kvcachecmd $(LIBEV)/ev.o
 
 build-controller:
 	$(CC) $(CFLAGS) kvcachectl.c -o build/kvcachectl
