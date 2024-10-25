@@ -14,6 +14,6 @@ kvcached is a project intended to make memory caching available for any program.
 
 ## Building
 ```sh
-make configure # Only once after downloading
-make
+$ make configure # Only once after downloading
+$ make
 ```
