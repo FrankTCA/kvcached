@@ -1,23 +1,28 @@
 all: build
 
-CFLAGS = -Wall -Wextra -ggdb -O3 -Wno-pointer-sign
+CFLAGS = -Wall -Wextra -ggdb -O3 -Wno-pointer-sign -isystem third_party
 LIBEV = third_party/libev/ev.o
+CC = gcc
 
-prepare-c:
+all:
 	set -xe
 	mkdir -p build
 
+configure:
+	git submodule update --init --recursive
+	./third_party/libev/configure --enable-static
+
 compile-libev:
-	./compile-libev.sh
+	cd third_party/libev/ && make
 
-build-server: prepare-c compile-libev
-	cc $(CFLAGS) kvcached.c -o build/kvcached $(LIBEV)
+build-server: compile-libev
+	$(CC) $(CFLAGS) kvcached.c -o build/kvcached $(LIBEV)
 
-build-client: prepare-c compile-libev
-	cc $(CFLAGS) kvcachecmd.c -o build/kvcachecmd $(LIBEV)
+build-client: compile-libev
+	$(CC) $(CFLAGS) kvcachecmd.c -o build/kvcachecmd $(LIBEV)
 
-build-controller: prepare-c
-	cc $(CFLAGS) kvcachectl.c -o build/kvcachectl
+build-controller:
+	$(CC) $(CFLAGS) kvcachectl.c -o build/kvcachectl
 
 build: build-server build-client
 
