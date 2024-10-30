@@ -11,6 +11,7 @@ all:
 configure:
 	git submodule update --init --recursive
 	cd $(LIBEV) && ./configure --enable-static
+	mkdir -p build
 
 compile-libev:
 	cd $(LIBEV) && make
