@@ -43,6 +43,18 @@ int connect_to_localhost(u16 port) {
 int main(int argc, char *argv[]) {
   Arena scratch = new_arena(20 * GiB);
 
+  if ((strcmp(argv[1], "--help") == 0) || (strcmp(argv[1], "-h") == 0)) {
+    printf("Usage: %s <port> <command> <parameters>\n\n", argv[0]);
+    printf("--------------------------\n");
+    printf("Commands:\n\n");
+    printf("S <key> [value] -- Saves value to kvcached. If no value specified reads from stdin.\n");
+    printf("G <key> -- Prints value of key to stdout.\n");
+    printf("D <key> -- Deletes the key and unloads from memory.\n");
+    printf("C -- Clears cache.\n");
+    printf("T <key> <seconds> -- Set timeout in seconds when key will be automatically deleted.\n");
+    return 0;
+  }
+
   ArgParser argp = {
     .argc = argc, .argv = argv,
     .i = 1,
@@ -113,6 +125,19 @@ int main(int argc, char *argv[]) {
 
     sock = connect_to_localhost(port);
     send_buf(sock, &command, sizeof(command));
+  } break;
+  case 'T': {
+    argp.extra_usage = s8("T <key> <seconds>");
+
+    s8 key = get_next_arg(&argp);
+    s8 time = get_next_arg(&argp);
+
+    no_more_args(argp);
+
+    sock = connect_to_localhost(port);
+    send_buf(sock, &command, sizeof(command));
+    send_s8(sock, key);
+    send_s8(sock, time);
   } break;
   default: {
     fprintf(stderr, "Error: Unrecognized command.\n");
