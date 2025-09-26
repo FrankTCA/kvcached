@@ -18,8 +18,8 @@ struct ArgParser {
 s8 get_next_arg(ArgParser *a) {
   if (a->i >= a->argc) a->usage_err(*a);
 
-  s8 ret = { .buf = a->argv[a->i], };
-  ret.len = strlen(ret.buf);
+  s8 ret = { .buf = (u8 *) a->argv[a->i], };
+  ret.len = strlen((char *) ret.buf);
 
   a->i += 1;
 
