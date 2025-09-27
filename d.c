@@ -51,33 +51,39 @@
 
 typedef struct {
     i32 sock;
-    s8 str;
+    Arena buf;
     int buf_len;
     int status;
-} Endpoint;
+} Connection;
+
+typedef struct {
+    Connection *buf;
+    ssize len;
+    ssize cap;
+} ConnectionSet;
 
 void recv_buf() {
-    Endpoint *c = (Endpoint *) aco_get_arg();
+    Connection *c = (Connection *) aco_get_arg();
 
     ssize_t recvd = 0;
 
     while (1) {
-        ssize_t bytes = recv(c->sock, c->str.buf + recvd, buf_len - recvd, 0);
+        ssize_t bytes = recv(c->sock, c->str.buf + recvd, c->buf_len - recvd, 0);
 
         if (bytes < 0) {
             perror("recv(3) error");
-            *status = -1;
+            c->status = -1;
             goto end;
         }
 
         if (bytes == 0) {
-            *status = 1;
+            c->status = 1;
             goto end;
         }
 
         recvd += bytes;
 
-        if (recvd < ->buf_len) {
+        if (recvd < c->buf_len) {
             aco_yield();
             continue;
         } else goto end;
@@ -85,6 +91,40 @@ void recv_buf() {
 
 end:
     aco_exit();
+}
+
+void connect(Server *s, ConnectionSet *cs) {
+    // TODO: handle errors
+
+    struct epoll_event e = { .events = EPOLLIN | EPOLLET, };
+
+    e.data.fd = accept(
+        s->sock,
+        (struct sockaddr *) &s->addr,
+        &s->addr_len
+    );
+
+    fcntl(e.data.fd, F_SETFL, O_NONBLOCK);
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, e.data.fd, &e);
+
+    e.data.u64 = cs->len++;
+
+    if (cs->len > cs->cap) {
+        cs->cap *= 2;
+        cs->buf = realloc(cs->buf, cs->cap);
+    }
+
+    cs->buf[cs->len - 1] = (Connection) {
+        .sock = e.data.fd,
+        .buf = new_arena(1 * KiB),
+        .buf_len = 5,
+    };
+
+    printf("Accepted new connection on socket %d\n", e.data.fd);
+}
+
+void disconnect(ConnectionSet *cs, int sock) {
+    cs->
 }
 
 int main() {
@@ -149,16 +189,6 @@ int main() {
 
         for (int i = 0; i < count; i++) {
             if (events[i].data.fd == s.sock) {
-                // TODO: handle errors
-                struct epoll_event e = { .events = EPOLLIN | EPOLLET, };
-                e.data.fd = accept(
-                    s.sock,
-                    (struct sockaddr *) &s.addr,
-                    &s.addr_len
-                );
-                fcntl(e.data.fd, F_SETFL, O_NONBLOCK);
-                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, e.data.fd, &e);
-                printf("Accepted new connection on socket %d\n", e.data.fd);
             } else {
 
             }
