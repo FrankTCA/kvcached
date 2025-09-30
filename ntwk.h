@@ -42,10 +42,10 @@ struct Server {
 // u8 recv_u8(i32 sock, int *status);
 // s8 recv_s8(Arena *perm, i32 sock, int *status);
 
-int send_buf(i32 sock, void *buf, ssize n);
-int send_i64(i32 sock, i64 a);
-int send_err(i32 sock, s8 str);
-int send_s8(i32 sock, s8 str);
+// int send_buf(i32 sock, void *buf, ssize n);
+// int send_i64(i32 sock, i64 a);
+// int send_err(i32 sock, s8 str);
+// int send_s8(i32 sock, s8 str);
 
 // void on_recv_wrap(struct ev_loop *loop, struct ev_io *io, int revents);
 // void on_connect_wrap(struct ev_loop *loop, struct ev_io *io, int revents);

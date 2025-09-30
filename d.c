@@ -51,10 +51,8 @@
 
 typedef struct {
     i32 sock;
-    Arena buf;
-    int buf_len;
-    int status;
     aco_t *co;
+    int status;
 } Connection;
 
 typedef struct {
@@ -65,42 +63,64 @@ typedef struct {
     aco_share_stack_t *share_stack;
 } ConnectionSet;
 
-void recv_buf() {
-    Connection *c = (Connection *) aco_get_arg();
-
+void recv_buf(Connection *c, u8 *buf, int buf_len) {
     ssize_t recvd = 0;
 
     while (1) {
-        ssize_t bytes = recv(c->sock, &c->buf.buf[c->buf.len], c->buf_len - recvd, 0);
-        c->buf.len += bytes; // TODO: check if it exceeded the capacity
+        // TODO: check for errors
+        ssize_t bytes = recv(c->sock, buf, buf_len - recvd, 0);
         recvd += bytes;
 
         if (bytes < 0) {
             perror("recv(3) error");
             c->status = -1;
-            goto end;
+            break;
         }
 
         if (bytes == 0) {
             c->status = 1;
-            goto end;
+            break;
         }
 
-        {
-            printf("\"");
-            s8_print((s8) { .buf = c->buf.buf, .len = c->buf.len, });
-            printf("\"\n");
-        }
-
-        if (recvd < c->buf_len) aco_yield();
-        else goto end;
+        if (recvd < buf_len) aco_yield();
+        else break;
     }
-
-end:
-    aco_exit();
 }
 
-void on_connect(Server *s, ConnectionSet *cs) {
+i64 recv_i64(Connection *c) {
+    u8 buf[8] = {0};
+    recv_buf(c, buf, arrlen(buf));
+    return ((i64) buf[7] <<  0) | ((i64) buf[6] <<  8) |
+           ((i64) buf[5] << 16) | ((i64) buf[4] << 24) |
+           ((i64) buf[3] << 32) | ((i64) buf[2] << 40) |
+           ((i64) buf[1] << 48) | ((i64) buf[0] << 56);
+}
+
+u8 recv_u8(Connection *c) {
+    u8 ret = 0;
+    recv_buf(c, &ret, 1);
+    return ret;
+}
+
+s8 recv_s8(Arena *perm, Connection *c) {
+    s8 ret = {0};
+    ret.len = recv_i64(c);
+
+    if (ret.len > RECV_MAX_SIZE) {
+        warning("Packet too large (%ld bytes). Ignoring connection.", ret.len);
+        // send_s8(c.sock, s8("Error: Packet cannot be larger than "
+        //                                  strify(RECV_MAX_SIZE) " bytes.\n"));
+        close(c->sock); // TODO: on_disconnect
+        return (s8) {0};
+    }
+
+    ret.buf = new(perm, u8, ret.len);
+    recv_buf(c, ret.buf, ret.len);
+
+    return ret;
+}
+
+void on_connect(Server *s, ConnectionSet *cs, aco_cofuncp_t cofn) {
     // TODO: handle errors
 
     struct epoll_event e = { .events = EPOLLIN | EPOLLET, };
@@ -113,12 +133,8 @@ void on_connect(Server *s, ConnectionSet *cs) {
     }
 
     Connection *c = &cs->buf[cs->len - 1];
-    *c = (Connection) {
-        .sock = e.data.fd,
-        .buf = new_arena(1 * KiB),
-        .buf_len = 5,
-    };
-    c->co = aco_create(cs->main_co, cs->share_stack, 0, recv_buf, c);
+    *c = (Connection) { .sock = e.data.fd, };
+    c->co = aco_create(cs->main_co, cs->share_stack, 0, cofn, c);
 
     c->sock = accept(
         s->sock,
@@ -132,9 +148,13 @@ void on_connect(Server *s, ConnectionSet *cs) {
     printf("Accepted new connection on socket %d\n", e.data.fd);
 }
 
-// void on_disconnect(ConnectionSet *cs, int sock) {
-//     cs->
-// }
+void connection_main() {
+    Connection *c = (Connection *) aco_get_arg();
+    Arena scratch = new_arena(2 * KiB);
+    s8 r = recv_s8(&scratch, c);
+    s8_print(r);
+    aco_exit();
+}
 
 int main() {
     const u64 SERVER_ID = -1;
@@ -147,12 +167,6 @@ int main() {
     // sstk = NULL;
     // aco_destroy(main_co);
     // main_co = NULL;
-
-    // Arena perm = new_arena(2 * KiB);
-    // int status = 0;
-    // s8 msg = recv_s8(&perm, sock, &status);
-    // s8_print(msg);
-    // printf("%ld\n", msg.len);
 
     Arena scratch = new_arena(4 * KiB);
 
@@ -189,7 +203,7 @@ int main() {
 
         for (int i = 0; i < count; i++) {
             if (events[i].data.u64 == SERVER_ID) {
-                on_connect(&server, &connection_set);
+                on_connect(&server, &connection_set, connection_main);
             } else {
                 Connection *c = &connection_set.buf[events[i].data.u64];
                 printf("READMEEEEE on socket %d!\n", c->sock);
