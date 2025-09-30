@@ -69,7 +69,9 @@ int main(int argc, char *argv[]) {
     }
 
     int sock = connect_to_localhost(port);
-    send_s8(sock, s8("Hi guys.\n"));
+    char *buf = "12345";
+    send_buf(sock, buf, sizeof(buf));
+    // send_s8(sock, s8("12345"));
 
     // switch (command) {
     // case 'S': {

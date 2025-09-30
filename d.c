@@ -13,7 +13,7 @@
     fprintf(stderr, "Error: "); \
     fprintf(stderr, __VA_ARGS__); \
     fprintf(stderr, "\n"); \
-    *((int *) 0) = 0; \
+    abort(); \
 } while (0);
 
 #define warning(...) do { \
@@ -54,12 +54,15 @@ typedef struct {
     Arena buf;
     int buf_len;
     int status;
+    aco_t *co;
 } Connection;
 
 typedef struct {
     Connection *buf;
     ssize len;
     ssize cap;
+    aco_t *main_co;
+    aco_share_stack_t *share_stack;
 } ConnectionSet;
 
 void recv_buf() {
@@ -68,7 +71,9 @@ void recv_buf() {
     ssize_t recvd = 0;
 
     while (1) {
-        ssize_t bytes = recv(c->sock, c->str.buf + recvd, c->buf_len - recvd, 0);
+        ssize_t bytes = recv(c->sock, &c->buf.buf[c->buf.len], c->buf_len - recvd, 0);
+        c->buf.len += bytes; // TODO: check if it exceeded the capacity
+        recvd += bytes;
 
         if (bytes < 0) {
             perror("recv(3) error");
@@ -81,71 +86,60 @@ void recv_buf() {
             goto end;
         }
 
-        recvd += bytes;
+        {
+            printf("\"");
+            s8_print((s8) { .buf = c->buf.buf, .len = c->buf.len, });
+            printf("\"\n");
+        }
 
-        if (recvd < c->buf_len) {
-            aco_yield();
-            continue;
-        } else goto end;
+        if (recvd < c->buf_len) aco_yield();
+        else goto end;
     }
 
 end:
     aco_exit();
 }
 
-void connect(Server *s, ConnectionSet *cs) {
+void on_connect(Server *s, ConnectionSet *cs) {
     // TODO: handle errors
 
     struct epoll_event e = { .events = EPOLLIN | EPOLLET, };
-
-    e.data.fd = accept(
-        s->sock,
-        (struct sockaddr *) &s->addr,
-        &s->addr_len
-    );
-
-    fcntl(e.data.fd, F_SETFL, O_NONBLOCK);
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, e.data.fd, &e);
 
     e.data.u64 = cs->len++;
 
     if (cs->len > cs->cap) {
         cs->cap *= 2;
-        cs->buf = realloc(cs->buf, cs->cap);
+        cs->buf = realloc(cs->buf, sizeof(*cs->buf) * cs->cap);
     }
 
-    cs->buf[cs->len - 1] = (Connection) {
+    Connection *c = &cs->buf[cs->len - 1];
+    *c = (Connection) {
         .sock = e.data.fd,
         .buf = new_arena(1 * KiB),
         .buf_len = 5,
     };
+    c->co = aco_create(cs->main_co, cs->share_stack, 0, recv_buf, c);
+
+    c->sock = accept(
+        s->sock,
+        (struct sockaddr *) &s->addr,
+        &s->addr_len
+    );
+
+    epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, c->sock, &e);
+    fcntl(e.data.fd, F_SETFL, O_NONBLOCK);
 
     printf("Accepted new connection on socket %d\n", e.data.fd);
 }
 
-void disconnect(ConnectionSet *cs, int sock) {
-    cs->
-}
+// void on_disconnect(ConnectionSet *cs, int sock) {
+//     cs->
+// }
 
 int main() {
-    // aco_thread_init(NULL);
-    // aco_t *main_co = aco_create(NULL, NULL, 0, NULL, NULL);
+    const u64 SERVER_ID = -1;
 
-    // aco_share_stack_t *sstk = aco_share_stack_new(0);
-
-    // int shared_counter = 0;
-    // aco_t *co = aco_create(main_co, sstk, 0, count_for_me, &shared_counter);
-
-    // int ct = 0;
-    // while (ct < 6) {
-    //     aco_resume(co);
-    //     // printf("main_co: %p\n", main_co);
-    //     printf("I am main %d!!!\n", shared_counter);
-    //     ct += 1;
-    // }
-
-    // // printf("main_co: %p\n", main_co);
-    // printf("I am done.\n");
+    aco_thread_init(NULL);
 
     // aco_destroy(co);
     // co = NULL;
@@ -153,10 +147,6 @@ int main() {
     // sstk = NULL;
     // aco_destroy(main_co);
     // main_co = NULL;
-
-    // while (1) {
-
-    // }
 
     // Arena perm = new_arena(2 * KiB);
     // int status = 0;
@@ -166,38 +156,51 @@ int main() {
 
     Arena scratch = new_arena(4 * KiB);
 
-    Server s = {0};
-    new_server(&s);
+    Server server = {0};
+    new_server(&server);
 
-    int epoll_fd = epoll_create1(0);
-    if (epoll_fd == -1) err("Failed to create epoll file descriptor.");
+    ConnectionSet connection_set = { .cap = 64, };
+    connection_set.buf = calloc(connection_set.cap, sizeof(*connection_set.buf));
 
-    struct epoll_event event = { .events = EPOLLIN, },
-                       events[128] = {0};
+    connection_set.main_co = aco_create(0, 0, 0, 0, 0);
+    connection_set.share_stack = aco_share_stack_new(0);
 
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s.sock, &event)) {
-        err("Failed to add file descriptor to epoll.");
+    server.epoll_fd = epoll_create1(0);
+    if (server.epoll_fd == -1) err("Failed to create epoll file descriptor.");
+
+    struct epoll_event events[128] = {0};
+
+    {
+        struct epoll_event e = {
+            .events = EPOLLIN,
+            .data.u64 = SERVER_ID, 
+        };
+        if (epoll_ctl(server.epoll_fd, EPOLL_CTL_ADD, server.sock, &e)) {
+            err("Failed to add file descriptor to epoll.");
+        }
     }
 
-    printf("Server is running on localhost:%d\n", s.port);
-    s8_write_to_file(s8("port.txt"), u64_to_s8(&scratch, s.port, 0));
+
+    printf("Server is running on localhost:%d\n", server.port);
+    s8_write_to_file(s8("port.txt"), u64_to_s8(&scratch, server.port, 0));
 
     while (1) {
-        printf("Polling for input...\n");
-        int count = epoll_wait(epoll_fd, events, arrlen(events), -1);
-        printf("%d ready events.\n", count);
+        int count = epoll_wait(server.epoll_fd, events, arrlen(events), -1);
 
         for (int i = 0; i < count; i++) {
-            if (events[i].data.fd == s.sock) {
+            if (events[i].data.u64 == SERVER_ID) {
+                on_connect(&server, &connection_set);
             } else {
-
+                Connection *c = &connection_set.buf[events[i].data.u64];
+                printf("READMEEEEE on socket %d!\n", c->sock);
+                aco_resume(c->co);
             }
 
             // int n = read(events[i].data.fd, scratch.buf, scratch.cap);
-            // printf("%s\n", scratch.buf);
+            // printf("%server\n", scratch.buf);
         }
 
     }
 
-    if (close(epoll_fd)) err("Failed to close epoll file descriptor.");
+    if (close(server.epoll_fd)) err("Failed to close epoll file descriptor.");
 }

@@ -5,7 +5,7 @@ set -xe
 rm -rf build
 mkdir build
 
-CFLAGS="-Wall -Wextra -ggdb -Os -std=c11"
+CFLAGS="-Wall -Wextra -ggdb -O0 -std=c11"
 ACO="./third_party/libaco/"
 ACO_FLAGS="build/aco.o build/acosw.o"
 

@@ -33,6 +33,7 @@ struct Server {
     socklen_t addr_len;
     int num_clients;
     void *data;
+    int epoll_fd;
 };
 
 // // Status is sticky -- it only changes upon non-continue
