@@ -22,33 +22,6 @@
     fprintf(stderr, "\n"); \
 } while (0);
 
-// void count_for_me() {
-//     int *iretp = (int *) aco_get_arg();
-
-//     aco_t *this_co = aco_get_co();
-
-//     int ct = 0;
-//     while (ct < 6) {
-//         // printf("co: %p save_stack: %p share_stack: %p yield_ct: %d\n",
-//         //     this_co, this_co->save_stack.ptr,
-//         //     this_co->share_stack->ptr, ct
-//         // );
-//         printf("I'm in this loop. The ct is %d\n", ct);
-//         aco_yield();
-//         (*iretp)++;
-//         ct++;
-//     }
-
-//     printf("I'm out of this loop. The ct is %d\n", ct);
-
-//     // printf("co: %p save_stack %p share_stack %p co_exit()\n",
-//     //     this_co, this_co->save_stack.ptr,
-//     //     this_co->share_stack->ptr
-//     // );
-
-//     aco_exit();
-// }
-
 typedef struct {
     i32 sock;
     aco_t *co;
