@@ -12,5 +12,5 @@ ACO_FLAGS="build/aco.o build/acosw.o"
 cc -O3 -c $ACO/aco.c -o build/aco.o
 cc -O3 -c $ACO/acosw.S -o build/acosw.o
 
-cc $CFLAGS $ACO_FLAGS -Ithird_party/ d.c -o build/kvcached
-cc $CFLAGS cmd.c -o build/kvcachecmd
+cc $CFLAGS $ACO_FLAGS -Ithird_party/ src/d.c -o build/kvcached
+cc $CFLAGS src/cmd.c -o build/kvcachecmd
