@@ -1,7 +1,10 @@
 #ifndef DS_H
 #define DS_H
 
+#ifndef assert
 #include <assert.h>
+#endif
+
 #include <errno.h>
 #include <libgen.h>
 #include <stdalign.h>

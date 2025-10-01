@@ -1,6 +1,7 @@
 #define DS_IMPL
 #include "ds.h"
 
+#define NTWK_BLOCKING
 #define NTWK_IMPL
 #include "ntwk.h"
 
@@ -15,8 +16,8 @@ void usage_err(ArgParser a) {
     exit(1);
 }
 
-int connect_to_localhost(u16 port) {
-    int sock = socket(PF_INET, SOCK_STREAM, 0);
+Connection connect_to_localhost(u16 port) {
+    Connection ret = { .sock = socket(PF_INET, SOCK_STREAM, 0), };
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
@@ -27,12 +28,12 @@ int connect_to_localhost(u16 port) {
 
     inet_pton(AF_INET, addrstr, &addr.sin_addr);
 
-    if (connect(sock, (struct sockaddr*) &addr, sizeof(addr))) {
+    if (connect(ret.sock, (struct sockaddr*) &addr, sizeof(addr))) {
         perror("connect(3) error");
         exit(1);
     }
 
-    return sock;
+    return ret;
 }
 
 int main(int argc, char *argv[]) {
@@ -68,8 +69,8 @@ int main(int argc, char *argv[]) {
         // command = c.buf[0];
     }
 
-    int sock = connect_to_localhost(port);
-    send_s8(sock, s8("Hello, peeps!\n"));
+    Connection c = connect_to_localhost(port);
+    send_s8(&c, s8("Hello, peeps!\n"));
 
     // switch (command) {
     // case 'S': {
