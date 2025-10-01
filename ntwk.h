@@ -23,13 +23,13 @@
 
 #include "ds.h"
 
-#ifndef RECV_MAX_SIZE
-#define RECV_MAX_SIZE (1 * GiB) // bytes
-#endif // RECV_MAX_SIZE
-
 typedef struct {
     i32 sock;
-    int status;
+    enum {
+        CONNECTION_ERR = -1,
+        CONNECTION_OK = 0,
+        CONNECTION_CLOSE,
+    } status;
 #ifndef NTWK_BLOCKING
     aco_t *co;
 #endif
@@ -66,6 +66,7 @@ void new_server(Server *s, i32 server_id);
 Connection accept_connection(Server *s);
 #ifndef NTWK_BLOCKING
 void on_connect(Server *s, aco_cofuncp_t cofn);
+bool on_disconnect(Server *s, u64 conn_id);
 #endif
 
 void recv_buf(Connection *c, u8 *buf, int buf_len);
@@ -139,7 +140,7 @@ void new_server(Server *s, i32 server_id) {
         s->epoll.events = calloc(s->epoll.len, sizeof(*s->epoll.events));
 
         struct epoll_event e = {
-            .events = EPOLLIN,
+            .events = EPOLLIN | EPOLLET,
             .data.u64 = server_id,
         };
         if (epoll_ctl(s->epoll.fd, EPOLL_CTL_ADD, s->sock, &e)) {
@@ -158,37 +159,82 @@ void new_server(Server *s, i32 server_id) {
 void on_connect(Server *s, aco_cofuncp_t cofn) {
     // TODO: handle errors
 
-    if (s->cs.len >= s->cs.cap) {
-        s->cs.cap *= 2;
-        s->cs.buf = realloc(s->cs.buf, sizeof(*s->cs.buf) * s->cs.cap);
+    while (1) {
+        if (s->cs.len >= s->cs.cap) {
+            s->cs.cap *= 2;
+            s->cs.buf = realloc(s->cs.buf, sizeof(*s->cs.buf) * s->cs.cap);
+        }
+
+        Connection *c = &s->cs.buf[s->cs.len],
+                    b = accept_connection(s);
+        if (b.sock < 0) break;
+        *c = b;
+
+        c->co = aco_create(s->main_co, s->share_stack, 0, cofn, c);
+
+        struct epoll_event e = { .events = EPOLLIN | EPOLLET, };
+        e.data.u64 = s->cs.len;
+        epoll_ctl(s->epoll.fd, EPOLL_CTL_ADD, c->sock, &e);
+        fcntl(c->sock, F_SETFL, O_NONBLOCK);
+
+        s->cs.len += 1;
+    }
+}
+
+bool on_disconnect(Server *s, u64 conn_id) {
+    bool ret = 0;
+    Connection *c = &s->cs.buf[conn_id];
+
+    if (epoll_ctl(s->epoll.fd, EPOLL_CTL_DEL, c->sock, NULL) == -1) {
+        // TODO: deal with errors
+        // warning("Failed to remove socket %d from epoll.", c->sock);
     }
 
-    Connection *c = &s->cs.buf[s->cs.len];
-    *c = accept_connection(s);
+    ret = ret || close(c->sock);
 
-    c->co = aco_create(s->main_co, s->share_stack, 0, cofn, c);
+    aco_destroy(c->co);
 
-    struct epoll_event e = { .events = EPOLLIN | EPOLLET, };
-    e.data.u64 = s->cs.len;
-    epoll_ctl(s->epoll.fd, EPOLL_CTL_ADD, c->sock, &e);
-    fcntl(c->sock, F_SETFL, O_NONBLOCK);
+    if ((i64) conn_id != s->cs.len - 1) {
+        Connection *last_c = &s->cs.buf[s->cs.len - 1];
+        *c = *last_c;
 
-    s->cs.len += 1;
+        struct epoll_event e = {
+            .events = EPOLLIN | EPOLLET, // same as on_connect
+            .data.u64 = conn_id,
+        };
+
+        if (epoll_ctl(s->epoll.fd, EPOLL_CTL_MOD, c->sock, &e)) {
+            // TODO: deal with errors
+            // err("Failed to modify epoll data for swapped connection.");
+        }
+    }
+
+    s->cs.len -= 1;
+
+    return ret;
 }
 #endif
 
 Connection accept_connection(Server *s) {
-    return (Connection) {
+    Connection ret =  {
         .sock = accept(
             s->sock,
             (struct sockaddr *) &s->addr,
             &s->addr_len
         ),
     };
+
+    if (ret.sock < 0 && errno != EAGAIN && errno != EWOULDBLOCK)  {
+        // TODO: handle errors
+        // perror("accept(2) error");
+    }
+
+    return ret;
 }
 
 void recv_buf(Connection *c, u8 *buf, int buf_len) {
     ssize_t recvd = 0;
+    if (c->status) return;
 
     while (1) {
         // TODO: check for errors
@@ -196,13 +242,14 @@ void recv_buf(Connection *c, u8 *buf, int buf_len) {
         recvd += bytes;
 
         if (bytes < 0) {
-            perror("recv(3) error");
-            c->status = -1;
+            // perror("recv(3) error");
+            // TODO: handle error strings
+            c->status = CONNECTION_ERR;
             break;
         }
 
         if (bytes == 0) {
-            c->status = 1;
+            c->status = CONNECTION_CLOSE;
             break;
         }
 
@@ -219,10 +266,10 @@ void recv_buf(Connection *c, u8 *buf, int buf_len) {
 i64 recv_i64(Connection *c) {
     u8 buf[8] = {0};
     recv_buf(c, buf, arrlen(buf));
-    return ((i64) buf[7] <<  0) | ((i64) buf[6] <<  8) |
-           ((i64) buf[5] << 16) | ((i64) buf[4] << 24) |
-           ((i64) buf[3] << 32) | ((i64) buf[2] << 40) |
-           ((i64) buf[1] << 48) | ((i64) buf[0] << 56);
+    return (((i64) buf[7]) <<  0) | (((i64) buf[6]) <<  8) |
+           (((i64) buf[5]) << 16) | (((i64) buf[4]) << 24) |
+           (((i64) buf[3]) << 32) | (((i64) buf[2]) << 40) |
+           (((i64) buf[1]) << 48) | (((i64) buf[0]) << 56);
 }
 
 u8 recv_u8(Connection *c) {
@@ -234,12 +281,14 @@ u8 recv_u8(Connection *c) {
 s8 recv_s8(Arena *perm, Connection *c) {
     s8 ret = {0};
     ret.len = recv_i64(c);
+    if (c->status) return (s8) {0};
 
-    if (ret.len > RECV_MAX_SIZE) {
+    if (ret.len > perm->cap) {
         // warning("Packet too large (%ld bytes). Ignoring connection.", ret.len);
         // send_s8(c.sock, s8("Error: Packet cannot be larger than "
         //                                  strify(RECV_MAX_SIZE) " bytes.\n"));
-        close(c->sock); // TODO: on_disconnect
+        // close(c->sock); // TODO: on_disconnect
+        c->status = CONNECTION_ERR;
         return (s8) {0};
     }
 

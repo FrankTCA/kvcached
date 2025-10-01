@@ -20,22 +20,18 @@
 void connection_main() {
     Connection *c = (Connection *) aco_get_arg();
     Arena scratch = new_arena(2 * KiB);
+
     s8 r = recv_s8(&scratch, c);
     s8_print(r);
+
+    free(scratch.buf);
+    scratch = (Arena) {0};
+
     aco_exit();
 }
 
 int main() {
     aco_thread_init(NULL);
-
-    // aco_destroy(co);
-    // co = NULL;
-    // aco_share_stack_destroy(sstk);
-    // sstk = NULL;
-    // aco_destroy(main_co);
-    // main_co = NULL;
-
-    Arena scratch = new_arena(4 * KiB);
 
     Server server = {
         .main_co = aco_create(0, 0, 0, 0, 0),
@@ -44,8 +40,7 @@ int main() {
     new_server(&server, -1);
 
     printf("Server is running on localhost:%d\n", server.port);
-    s8_write_to_file(s8("port.txt"), u64_to_s8(&scratch, server.port, 0));
-    printf("%ld\n", server.epoll.len);
+    s8_write_to_file(s8("port.txt"), u64_to_s8(NULL, server.port, 0));
 
     while (1) {
         int count = epoll_wait(
@@ -56,12 +51,17 @@ int main() {
         );
 
         for (int i = 0; i < count; i++) {
-            if (server.epoll.events[i].data.u64 == server.server_id) {
+            u64 conn_id = server.epoll.events[i].data.u64;
+            u32 events = server.epoll.events[i].events;
+
+            if (conn_id == server.server_id) {
                 on_connect(&server, connection_main);
-            } else {
-                Connection *c = &server.cs.buf[server.epoll.events[i].data.u64];
-                printf("READMEEEEE on socket %d!\n", c->sock);
+            } else if (events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) {
+                on_disconnect(&server, conn_id);
+            } else if (events & EPOLLIN) {
+                Connection *c = &server.cs.buf[conn_id];
                 aco_resume(c->co);
+                if (c->status || c->co->is_end) on_disconnect(&server, conn_id);
             }
         }
     }

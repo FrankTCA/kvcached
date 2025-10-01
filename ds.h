@@ -135,6 +135,7 @@ s8 s8_copy(Arena *perm, s8 s) {
 }
 
 void s8_modcat(Arena *perm, s8 *a, s8 b) {
+    assert(perm);
     assert(&a->buf[a->len] == &perm->buf[perm->len]);
     s8_copy(perm, b);
     a->len += b.len;
@@ -325,7 +326,7 @@ s8 u64_to_s8(Arena *perm, u64 n, int padding) {
         padding,
         (unsigned long long int) n
     );
-    perm->len -= buf_len - ret.len;
+    if (perm) perm->len -= buf_len - ret.len;
 
     return ret;
 }
