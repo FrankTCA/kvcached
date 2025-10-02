@@ -110,7 +110,7 @@ void *arena_alloc(Arena *a, ssize size, ssize align, ssize count) {
     assert(size >= 0);
     assert(count >= 0);
 
-    if (a == NULL) return calloc(count, size);
+    if (!a || !a->buf) return calloc(count, size);
 
     ssize pad = -(uintptr_t)(&a->buf[a->len]) & (align - 1);
     ssize available = a->cap - a->len - pad;

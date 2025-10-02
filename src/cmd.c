@@ -62,15 +62,20 @@ int main(int argc, char *argv[]) {
     u16 port;
     {
         s8 p = get_next_arg(&argp);
-        // s8 c = get_next_arg(&argp);
-        // if (c.len != 1) argp.usage_err(argp);
-
         port = atoi((char *) p.buf);
-        // command = c.buf[0];
     }
 
     Connection c = connect_to_localhost(port);
-    send_s8(&c, s8("Hello, peeps!\n"));
+    Connection *c_ptr = &c;
+
+    send_i64(&c_ptr, 'S');
+    send_i64(&c_ptr, 0);
+
+    send_s8(&c_ptr, s8("Hi"));
+    send_s8(&c_ptr, s8("An English greeting. Especially common in informal scenarios."));
+
+    send_i64(&c_ptr, 'G');
+    send_s8(&c_ptr, s8("Hi"));
 
     // switch (command) {
     // case 'S': {

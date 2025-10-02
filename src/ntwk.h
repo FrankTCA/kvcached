@@ -24,6 +24,7 @@
 #include "ds.h"
 
 typedef struct {
+    void *data;
     i32 sock;
     enum {
         CONNECTION_ERR = -1,
@@ -43,8 +44,7 @@ typedef struct {
 } ConnectionSet;
 #endif
 
-typedef struct Server Server;
-struct Server {
+typedef struct {
     u16 port;
     i32 sock;
     struct sockaddr_in addr;
@@ -156,7 +156,7 @@ void new_server(Server *s, i32 server_id) {
 }
 
 #ifndef NTWK_BLOCKING
-void on_connect(Server *s, aco_cofuncp_t cofn) {
+void on_connect(Server *s, aco_cofuncp_t cofn, void *data) {
     // TODO: handle errors
 
     while (1) {

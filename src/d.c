@@ -17,16 +17,82 @@
 #define DS_IMPL
 #include "ds.h"
 
+typedef struct Cache Cache;
+typedef struct Cache {
+    Cache *child[4];
+    s8 key;
+    s8 val;
+} Cache;
+
+typedef struct {
+    Cache **cache;
+} ConnectionData;
+
+s8 *cache_upsert(Arena *perm, Cache **m, s8 key, bool make) {
+    for (u64 h = s8_hash(key); *m; h <<= 2) {
+        if (s8_equals(key, (*m)->key)) return &(*m)->val;
+        m = &(*m)->child[h>>62];
+    }
+    if (!make) return 0;
+    *m = new(perm, Cache, 1);
+    (*m)->key = key;
+    return &(*m)->val;
+}
+
 void connection_main() {
     Connection *c = (Connection *) aco_get_arg();
-    Arena scratch = new_arena(2 * KiB);
+    ConnectionData *data = (ConnectionData *) c->data;
+    Arena key_arena = new_arena(20 * GiB),
+          val_arena = { .cap = PTRDIFF_MAX, }; // non-local
 
-    s8 r = recv_s8(&scratch, c);
-    s8_print(r);
+    while (!c->status) {
+        printf("Socket: %d %p\n", c->sock, aco_get_co());
+        u64 cmd = recv_i64(&c);
+        if (c->status) goto end;
 
-    free(scratch.buf);
-    scratch = (Arena) {0};
+        switch (cmd) {
+        case 'S': {
+            u64 timeout_seconds = recv_i64(&c);
+            s8 key = recv_s8(&key_arena, &c),
+               val = recv_s8(&val_arena, &c);
+            if (c->status) goto end;
 
+            *cache_upsert(NULL, data->cache, key, 1) = val;
+        } break;
+        case 'G': {
+            s8 key = recv_s8(&key_arena, &c);
+            if (c->status) goto end;
+
+            s8 *val = cache_upsert(NULL, data->cache, key, 0);
+            if (c->status) goto end;
+            if (val) s8_print(*val);
+            else printf("Value does not exist!");
+            printf("\n");
+        } break;
+        case 'E': {
+            s8 key = recv_s8(&key_arena, &c);
+            if (c->status) goto end;
+        } break;
+        case 'D': {
+            s8 key = recv_s8(&key_arena, &c);
+            if (c->status) goto end;
+        } break;
+        case 'C': {
+        } break;
+        case 'T': {
+            u64 timeout_seconds = recv_i64(&c);
+            s8 key = recv_s8(&key_arena, &c);
+            if (c->status) goto end;
+        } break;
+        }
+
+        key_arena.len = val_arena.len = 0;
+    }
+
+end:
+    free(key_arena.buf);
+    key_arena = (Arena) {0};
+    val_arena = (Arena) {0};
     aco_exit();
 }
 
@@ -42,6 +108,8 @@ int main() {
     printf("Server is running on localhost:%d\n", server.port);
     s8_write_to_file(s8("port.txt"), u64_to_s8(NULL, server.port, 0));
 
+    Cache *cache = 0;
+
     while (1) {
         int count = epoll_wait(
             server.epoll.fd,
@@ -55,7 +123,9 @@ int main() {
             u32 events = server.epoll.events[i].events;
 
             if (conn_id == server.server_id) {
-                on_connect(&server, connection_main);
+                ConnectionData data = { .cache = &cache, };
+                on_connect(&server, connection_main, &data);
+                printf("We're launching off, partner.\n");
             } else if (events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) {
                 on_disconnect(&server, conn_id);
             } else if (events & EPOLLIN) {
@@ -67,4 +137,6 @@ int main() {
     }
 
     if (close(server.epoll.fd)) err("Failed to close epoll file descriptor.");
+
+    return 0;
 }
