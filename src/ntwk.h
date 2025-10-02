@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <errno.h>
 
 #ifndef NTWK_BLOCKING
 #include <libaco/aco.h>
@@ -60,24 +61,24 @@ typedef struct {
     aco_t *main_co; // If this not null, it's preserved upon new_server(...)
     aco_share_stack_t *share_stack; // Same as above
 #endif
-};
+} Server;
 
 void new_server(Server *s, i32 server_id);
 Connection accept_connection(Server *s);
 #ifndef NTWK_BLOCKING
-void on_connect(Server *s, aco_cofuncp_t cofn);
+void on_connect(Server *s, aco_cofuncp_t cofn, void *data);
 bool on_disconnect(Server *s, u64 conn_id);
 #endif
 
-void recv_buf(Connection *c, u8 *buf, int buf_len);
-i64 recv_i64(Connection *c);
-u8 recv_u8(Connection *c);
-s8 recv_s8(Arena *perm, Connection *c);
+void recv_buf(Connection **c, u8 *buf, int buf_len);
+i64 recv_i64(Connection **c);
+u8 recv_u8(Connection **c);
+s8 recv_s8(Arena *perm, Connection **c);
 
-int send_buf(Connection *c, void *buf, ssize n);
-int send_i64(Connection *c, i64 a);
-int send_err(Connection *c, s8 str);
-int send_s8(Connection *c, s8 str);
+void send_buf(Connection **c, u8 *buf, ssize n);
+void send_i64(Connection **c, i64 a);
+void send_err(Connection **c, s8 str);
+void send_s8(Connection **c, s8 str);
 
 #endif // NTWK_H
 
@@ -118,7 +119,7 @@ void new_server(Server *s, i32 server_id) {
     getsockname(s->sock, (struct sockaddr *) &s->addr, &s->addr_len);
     s->port = (int) ntohs(s->addr.sin_port);
 
-    if (listen(s->sock, 1)) {
+    if (listen(s->sock, SOMAXCONN)) {
         perror("listen(3) error");
         exit(1);
     }
@@ -171,8 +172,9 @@ void on_connect(Server *s, aco_cofuncp_t cofn, void *data) {
         *c = b;
 
         c->co = aco_create(s->main_co, s->share_stack, 0, cofn, c);
+        c->data = data;
 
-        struct epoll_event e = { .events = EPOLLIN | EPOLLET, };
+        struct epoll_event e = { .events = EPOLLIN | EPOLLOUT | EPOLLET, };
         e.data.u64 = s->cs.len;
         epoll_ctl(s->epoll.fd, EPOLL_CTL_ADD, c->sock, &e);
         fcntl(c->sock, F_SETFL, O_NONBLOCK);
@@ -197,9 +199,10 @@ bool on_disconnect(Server *s, u64 conn_id) {
     if ((i64) conn_id != s->cs.len - 1) {
         Connection *last_c = &s->cs.buf[s->cs.len - 1];
         *c = *last_c;
+        c->co->arg = c;
 
         struct epoll_event e = {
-            .events = EPOLLIN | EPOLLET, // same as on_connect
+            .events = EPOLLIN | EPOLLOUT | EPOLLET, // same as on_connect
             .data.u64 = conn_id,
         };
 
@@ -232,38 +235,37 @@ Connection accept_connection(Server *s) {
     return ret;
 }
 
-void recv_buf(Connection *c, u8 *buf, int buf_len) {
+#include <errno.h> // Make sure this is included for errno
+
+void recv_buf(Connection **c, u8 *buf, int buf_len) {
     ssize_t recvd = 0;
-    if (c->status) return;
+    if ((*c)->status) return;
 
-    while (1) {
-        // TODO: check for errors
-        ssize_t bytes = recv(c->sock, buf, buf_len - recvd, 0);
-        recvd += bytes;
+    while (recvd < buf_len) {
+        ssize_t bytes = recv((*c)->sock, buf + recvd, buf_len - recvd, 0);
 
-        if (bytes < 0) {
+        if (bytes > 0) {
+            recvd += bytes;
+        } else if (bytes == 0) {
+            (*c)->status = CONNECTION_CLOSE;
+            return;
+        } else {
+            #ifndef NTWK_BLOCKING
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                aco_yield();
+                *c = (Connection *) aco_get_arg();
+                continue;
+            }
+            #endif
+
             // perror("recv(3) error");
-            // TODO: handle error strings
-            c->status = CONNECTION_ERR;
-            break;
+            (*c)->status = CONNECTION_ERR;
+            return;
         }
-
-        if (bytes == 0) {
-            c->status = CONNECTION_CLOSE;
-            break;
-        }
-
-#ifndef NTWK_BLOCKING
-        if (recvd < buf_len) {
-            aco_yield();
-            continue;
-        }
-#endif
-        break;
     }
 }
 
-i64 recv_i64(Connection *c) {
+i64 recv_i64(Connection **c) {
     u8 buf[8] = {0};
     recv_buf(c, buf, arrlen(buf));
     return (((i64) buf[7]) <<  0) | (((i64) buf[6]) <<  8) |
@@ -272,43 +274,64 @@ i64 recv_i64(Connection *c) {
            (((i64) buf[1]) << 48) | (((i64) buf[0]) << 56);
 }
 
-u8 recv_u8(Connection *c) {
+u8 recv_u8(Connection **c) {
     u8 ret = 0;
     recv_buf(c, &ret, 1);
     return ret;
 }
 
-s8 recv_s8(Arena *perm, Connection *c) {
+s8 recv_s8(Arena *perm, Connection **c) {
+    assert(perm);
+
     s8 ret = {0};
     ret.len = recv_i64(c);
-    if (c->status) return (s8) {0};
+    if ((*c)->status) return ret;
 
-    if (ret.len > perm->cap) {
-        // warning("Packet too large (%ld bytes). Ignoring connection.", ret.len);
+    ssize ulen = ret.len > 0 ? ret.len : -ret.len;
+
+    if (perm->len + ulen > perm->cap) {
+        // warning("Packet too large (%ld bytes). Ignoring connection.", ulen);
         // send_s8(c.sock, s8("Error: Packet cannot be larger than "
         //                                  strify(RECV_MAX_SIZE) " bytes.\n"));
-        // close(c->sock); // TODO: on_disconnect
-        c->status = CONNECTION_ERR;
-        return (s8) {0};
+        (*c)->status = CONNECTION_ERR;
+        return ret;
     }
 
-    ret.buf = new(perm, u8, ret.len);
-    recv_buf(c, ret.buf, ret.len);
+    ret.buf = new(perm, u8, ulen);
+    recv_buf(c, ret.buf, ulen);
 
     return ret;
 }
 
+void send_buf(Connection **c, u8 *buf, ssize n) {
+    if ((*c)->status) return;
 
-int send_buf(Connection *c, void *buf, ssize n) {
-    int status = send(c->sock, buf, n, 0);
-    if (status < 0) {
-        // perror("send(3) error");
-        return status;
+    ssize_t sent = 0;
+
+    while (sent < n) {
+        ssize_t bytes = send((*c)->sock, buf + sent, n - sent, 0);
+
+        if (bytes > 0) {
+            sent += bytes;
+        } else if (bytes == 0) {
+            (*c)->status = CONNECTION_ERR;
+            return;
+        } else {
+            #ifndef NTWK_BLOCKING
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                aco_yield();
+                *c = (Connection *) aco_get_arg();
+                continue;
+            }
+            #endif
+
+            (*c)->status = CONNECTION_ERR;
+            return;
+        }
     }
-    return 0;
 }
 
-int send_i64(Connection *c, i64 a) {
+void send_i64(Connection **c, i64 a) {
     u8 buf[8];
     buf[7] = (a & 0x00000000000000ff);
     buf[6] = (a & 0x000000000000ff00) >> 8;
@@ -318,20 +341,17 @@ int send_i64(Connection *c, i64 a) {
     buf[2] = (a & 0x0000ff0000000000) >> 40;
     buf[1] = (a & 0x00ff000000000000) >> 48;
     buf[0] = (a & 0xff00000000000000) >> 56;
-    return send_buf(c, buf, sizeof(buf));
+    send_buf(c, buf, sizeof(buf));
 }
 
-int send_err(Connection *c, s8 str) {
-    int status = send_i64(c, -str.len);
-    if (status) return status;
-
-    return send_buf(c, str.buf, str.len * sizeof(u8));
+void send_err(Connection **c, s8 str) {
+    send_i64(c, -str.len);
+    send_buf(c, str.buf, str.len * sizeof(u8));
 }
 
-int send_s8(Connection *c, s8 str) {
-    int status = send_i64(c, str.len);
-    if (status) return status;
-    return send_buf(c, str.buf, str.len * sizeof(u8));
+void send_s8(Connection **c, s8 str) {
+    send_i64(c, str.len);
+    send_buf(c, str.buf, str.len * sizeof(u8));
 }
 
 #endif // NTWK_IMPL_GUARD
