@@ -182,7 +182,8 @@ s8 s8_replace_all(Arena *perm, s8 s, s8 old, s8 new) {
 }
 
 void s8_print(s8 s) {
-    for (ssize i = 0; i < s.len; i++) {
+    ssize ulen = s.len > 0 ? s.len : -s.len;
+    for (ssize i = 0; i < ulen; i++) {
         printf("%c", s.buf[i]);
     }
 }

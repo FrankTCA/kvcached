@@ -65,17 +65,38 @@ int main(int argc, char *argv[]) {
         port = atoi((char *) p.buf);
     }
 
+    s8 r = (s8) {0};
+
+    Arena perm = new_arena(2 * KiB);
+
     Connection c = connect_to_localhost(port);
     Connection *c_ptr = &c;
 
     send_i64(&c_ptr, 'S');
     send_i64(&c_ptr, 0);
-
-    send_s8(&c_ptr, s8("Hi"));
+    send_s8(&c_ptr, s8("Yo"));
     send_s8(&c_ptr, s8("An English greeting. Especially common in informal scenarios."));
+    r = recv_s8(&perm, &c_ptr);
+    s8_print(r);
+    printf("\n");
 
     send_i64(&c_ptr, 'G');
-    send_s8(&c_ptr, s8("Hi"));
+    send_s8(&c_ptr, s8("Yo"));
+    r = recv_s8(&perm, &c_ptr);
+    s8_print(r);
+    printf("\n");
+
+    send_i64(&c_ptr, 'D');
+    send_s8(&c_ptr, s8("Yo"));
+    r = recv_s8(&perm, &c_ptr);
+    s8_print(r);
+    printf("\n");
+
+    send_i64(&c_ptr, 'G');
+    send_s8(&c_ptr, s8("Yo"));
+    r = recv_s8(&perm, &c_ptr);
+    s8_print(r);
+    printf("\n");
 
     // switch (command) {
     // case 'S': {

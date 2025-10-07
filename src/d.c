@@ -17,26 +17,54 @@
 #define DS_IMPL
 #include "ds.h"
 
+typedef struct {
+    s8 str;
+    int timeout;
+} CacheVal;
+
 typedef struct Cache Cache;
 typedef struct Cache {
     Cache *child[4];
+    bool deleted;
     s8 key;
-    s8 val;
+    CacheVal val;
 } Cache;
 
 typedef struct {
     Cache **cache;
 } ConnectionData;
 
-s8 *cache_upsert(Arena *perm, Cache **m, s8 key, bool make) {
-    for (u64 h = s8_hash(key); *m; h <<= 2) {
-        if (s8_equals(key, (*m)->key)) return &(*m)->val;
-        m = &(*m)->child[h>>62];
+Cache *cache_upsert(Cache **c, s8 key, bool make) {
+    Cache **least_deleted = 0;
+
+    for (u64 h = s8_hash(key); *c; h <<= 2) {
+        if ((*c)->deleted) {
+            if (!least_deleted) least_deleted = c;
+        } else if (s8_equals(key, (*c)->key)) return *c;
+        c = &(*c)->child[h>>62];
     }
+
     if (!make) return 0;
-    *m = new(perm, Cache, 1);
-    (*m)->key = key;
-    return &(*m)->val;
+    if (least_deleted) c = least_deleted;
+    else *c = new(0, Cache, 1);
+    (*c)->key = s8_copy(0, key);
+    (*c)->deleted = false;
+
+    return *c;
+}
+
+int cache_delete(Cache **c, s8 key) {
+    Cache *e = cache_upsert(c, key, false);
+    if (!e) return -1;
+
+    free(e->key.buf);
+    free(e->val.str.buf);
+    e->key = (s8) {0};
+    e->val = (CacheVal) {0};
+
+    e->deleted = true;
+
+    return 0;
 }
 
 void connection_main() {
@@ -46,41 +74,41 @@ void connection_main() {
           val_arena = { .cap = PTRDIFF_MAX, }; // non-local
 
     while (!c->status) {
-        printf("Socket: %d %p\n", c->sock, aco_get_co());
         u64 cmd = recv_i64(&c);
         if (c->status) goto end;
 
         switch (cmd) {
         case 'S': {
-            u64 timeout_seconds = recv_i64(&c);
+            u64 timeout  = recv_i64(&c);
             s8 key = recv_s8(&key_arena, &c),
                val = recv_s8(&val_arena, &c);
             if (c->status) goto end;
 
-            *cache_upsert(NULL, data->cache, key, 1) = val;
+            Cache *entry = cache_upsert(data->cache, key, 1);
+            entry->val = (CacheVal) { .str = val, .timeout = timeout, };
+
+            send_s8(&c, s8("OK."));
         } break;
         case 'G': {
             s8 key = recv_s8(&key_arena, &c);
             if (c->status) goto end;
 
-            s8 *val = cache_upsert(NULL, data->cache, key, 0);
-            if (c->status) goto end;
-            if (val) s8_print(*val);
-            else printf("Value does not exist!");
-            printf("\n");
-        } break;
-        case 'E': {
-            s8 key = recv_s8(&key_arena, &c);
-            if (c->status) goto end;
+            Cache *entry = cache_upsert(data->cache, key, 0);
+
+            if (entry) send_s8(&c, entry->val.str);
+            else send_err(&c, s8("Error: No such key."));
         } break;
         case 'D': {
             s8 key = recv_s8(&key_arena, &c);
             if (c->status) goto end;
+
+            if (cache_delete(data->cache, key)) send_err(&c, s8("Error: No such key."));
+            else send_s8(&c, s8("OK."));
         } break;
         case 'C': {
         } break;
         case 'T': {
-            u64 timeout_seconds = recv_i64(&c);
+            u64 timeout  = recv_i64(&c);
             s8 key = recv_s8(&key_arena, &c);
             if (c->status) goto end;
         } break;
@@ -97,7 +125,7 @@ end:
 }
 
 int main() {
-    aco_thread_init(NULL);
+    aco_thread_init(0);
 
     Server server = {
         .main_co = aco_create(0, 0, 0, 0, 0),
@@ -106,7 +134,7 @@ int main() {
     new_server(&server, -1);
 
     printf("Server is running on localhost:%d\n", server.port);
-    s8_write_to_file(s8("port.txt"), u64_to_s8(NULL, server.port, 0));
+    s8_write_to_file(s8("port.txt"), u64_to_s8(0, server.port, 0));
 
     Cache *cache = 0;
 
@@ -128,10 +156,14 @@ int main() {
                 printf("We're launching off, partner.\n");
             } else if (events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) {
                 on_disconnect(&server, conn_id);
+                printf("Goodbye! Maybe you'll see more next time.\n");
             } else if (events & EPOLLIN) {
                 Connection *c = &server.cs.buf[conn_id];
                 aco_resume(c->co);
-                if (c->status || c->co->is_end) on_disconnect(&server, conn_id);
+                if (c->status || c->co->is_end) {
+                    on_disconnect(&server, conn_id);
+                    printf("Bye! See ya on the other side.\n");
+                }
             }
         }
     }
