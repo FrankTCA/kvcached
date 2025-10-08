@@ -67,6 +67,45 @@ int cache_delete(Cache **c, s8 key) {
     return 0;
 }
 
+typedef struct {
+    Cache *c;
+    int n;
+} CacheStackItem;
+
+void cache_clear_all(Cache **c) {
+    if (!(*c)) return;
+
+    List(CacheStackItem) stack = { .cap = 128, };
+
+    list_push(&stack, (CacheStackItem) { .c = *c, });
+
+    while (stack.len) {
+        CacheStackItem *item = &list_last(&stack);
+
+        for (int i = item->n; i < arrlen(item->c->child); i++) {
+            item->n += 1;
+
+            if (item->c->child[i]) {
+                list_push(&stack, (CacheStackItem) { .c = item->c->child[i], });
+                goto continue_loop;
+            }
+        }
+
+        free(item->c->key.buf);
+        free(item->c->val.str.buf);
+        free(item->c);
+        stack.len -= 1;
+
+continue_loop:
+        continue;
+    }
+
+    *c = 0;
+
+    free(stack.buf);
+    stack.buf = 0;
+}
+
 void connection_main() {
     Connection *c = (Connection *) aco_get_arg();
     ConnectionData *data = (ConnectionData *) c->data;
@@ -106,11 +145,18 @@ void connection_main() {
             else send_s8(&c, s8("OK."));
         } break;
         case 'C': {
+            cache_clear_all(data->cache);
+            send_s8(&c, s8("OK."));
         } break;
         case 'T': {
             u64 timeout  = recv_i64(&c);
             s8 key = recv_s8(&key_arena, &c);
             if (c->status) goto end;
+
+            Cache *entry = cache_upsert(data->cache, key, 1);
+            entry->val.timeout = timeout;
+
+            send_s8(&c, s8("OK."));
         } break;
         }
 
@@ -125,6 +171,10 @@ end:
 }
 
 int main() {
+    Cache cache_t = {0};
+    Cache *cache_ptr = &cache_t;
+    printf("%ld\n", arrlen(cache_ptr->child));
+
     aco_thread_init(0);
 
     Server server = {

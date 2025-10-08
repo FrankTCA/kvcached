@@ -72,31 +72,35 @@ int main(int argc, char *argv[]) {
     Connection c = connect_to_localhost(port);
     Connection *c_ptr = &c;
 
-    send_i64(&c_ptr, 'S');
-    send_i64(&c_ptr, 0);
-    send_s8(&c_ptr, s8("Yo"));
-    send_s8(&c_ptr, s8("An English greeting. Especially common in informal scenarios."));
+    for (u8 c = 0; c < 'z' - 'a'; c++) {
+        s8 key = { .buf = &c, .len = 1, };
+
+        u8 k = c + 'a';
+        s8 val = { .buf = &k, .len = 1, };
+
+        send_i64(&c_ptr, 'S');
+        send_i64(&c_ptr, 0);
+        send_s8(&c_ptr, key);
+        send_s8(&c_ptr, val);
+        r = recv_s8(&perm, &c_ptr);
+        s8_print(r);
+        printf("\n");
+    }
+
+    send_i64(&c_ptr, 'C');
     r = recv_s8(&perm, &c_ptr);
     s8_print(r);
     printf("\n");
 
-    send_i64(&c_ptr, 'G');
-    send_s8(&c_ptr, s8("Yo"));
-    r = recv_s8(&perm, &c_ptr);
-    s8_print(r);
-    printf("\n");
+    for (u8 c = 0; c < 'z' - 'a'; c++) {
+        s8 key = { .buf = &c, .len = 1, };
 
-    send_i64(&c_ptr, 'D');
-    send_s8(&c_ptr, s8("Yo"));
-    r = recv_s8(&perm, &c_ptr);
-    s8_print(r);
-    printf("\n");
-
-    send_i64(&c_ptr, 'G');
-    send_s8(&c_ptr, s8("Yo"));
-    r = recv_s8(&perm, &c_ptr);
-    s8_print(r);
-    printf("\n");
+        send_i64(&c_ptr, 'G');
+        send_s8(&c_ptr, key);
+        r = recv_s8(&perm, &c_ptr);
+        s8_print(r);
+        printf("\n");
+    }
 
     // switch (command) {
     // case 'S': {

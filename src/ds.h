@@ -45,23 +45,46 @@ typedef struct {
     ssize len;
 } s8;
 
-#define List(T) struct { Arena *a; T *buf; ssize cap, len; }
-#define new_list(arena, T) { .a = (arena), .buf = new((arena), T, 0), }
-// #define list_push(l, x)
-//     do {
-//         assert(&(l)->a->buf[(l)->a->len] == (u8 *) &(l)->buf[(l)->len]);
-//         (l)->len += 1;
-//         (void) new((l)->a, typeof(*(l)->buf), 1);
-//         (l)->buf[(l)->len - 1] = (x);
-//     } while (0)
-// // this is needed because of the assert in list_push
-// #define list_set_len(l, nlen)
-// do {
-//     typeof(nlen) llen = (nlen); /* to avoid recomputing the value */
-//     assert((l)->len >= llen);
-//     (l)->a->len -= (l)->len - llen;
-//     (l)->len = llen;
-// } while (0);
+#include <stdlib.h>
+#include <assert.h>
+#include <stdio.h>
+
+#ifndef ssize
+    typedef long ssize;
+#endif
+
+#define List(T) struct { \
+    T *buf;              \
+    ssize cap;           \
+    ssize len;           \
+}
+
+#define list_free(l)            \
+    do {                        \
+        if ((l)->buf != NULL) { \
+            free((l)->buf);     \
+            (l)->buf = NULL;    \
+            (l)->cap = 0;       \
+            (l)->len = 0;       \
+        }                       \
+    } while (0)
+
+#define list_push(l, ...)                                                 \
+    do {                                                                  \
+        bool ok = 0;                                                      \
+        if ((l)->len >= (l)->cap) {                                       \
+            if (!(l)->cap) (l)->cap = 128;                                \
+            else (l)->cap *= 2;                                           \
+            ok = true;                                                    \
+        }                                                                 \
+        if (!(l)->buf) ok = true;                                         \
+        if (ok) (l)->buf = realloc((l)->buf, (l)->cap*sizeof(*(l)->buf)); \
+                                                                          \
+        (l)->buf[(l)->len++] = (__VA_ARGS__);                             \
+    } while (0)
+
+#define list_last(l) ((l)->buf[(l)->len - 1])
+
 #define swap(x1, x2)             \
     do {                         \
         typeof((x1)) tmp = (x1); \
