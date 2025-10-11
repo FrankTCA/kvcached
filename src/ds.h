@@ -28,7 +28,7 @@ typedef float f32;
 typedef double f64;
 typedef ptrdiff_t ssize;
 
-#define arrlen(arr) (ssize) (sizeof(arr)/sizeof(arr[0]))
+#define arrlen(...) (ssize)(sizeof(__VA_ARGS__) / sizeof(*__VA_ARGS__))
 #define slice(l, i, _len) { .buf = &(l).buf[i], .len = (_len), }
 #define strify(c) #c
 #define KiB (ssize) (1 << 10)

@@ -37,8 +37,6 @@ Connection connect_to_localhost(u16 port) {
 }
 
 int main(int argc, char *argv[]) {
-    Arena scratch = new_arena(20 * GiB);
-
     if ((strcmp(argv[1], "--help") == 0) || (strcmp(argv[1], "-h") == 0)) {
         printf("Usage: %s <port> <command> <parameters>\n\n", argv[0]);
         printf("--------------------------\n");
@@ -75,8 +73,8 @@ int main(int argc, char *argv[]) {
     for (u8 c = 0; c < 'z' - 'a'; c++) {
         s8 key = { .buf = &c, .len = 1, };
 
-        u8 k = c + 'a';
-        s8 val = { .buf = &k, .len = 1, };
+        u8 v = c + 'a';
+        s8 val = { .buf = &v, .len = 1, };
 
         send_i64(&c_ptr, 'S');
         send_i64(&c_ptr, 0);
@@ -87,11 +85,6 @@ int main(int argc, char *argv[]) {
         printf("\n");
     }
 
-    send_i64(&c_ptr, 'C');
-    r = recv_s8(&perm, &c_ptr);
-    s8_print(r);
-    printf("\n");
-
     for (u8 c = 0; c < 'z' - 'a'; c++) {
         s8 key = { .buf = &c, .len = 1, };
 
@@ -101,6 +94,21 @@ int main(int argc, char *argv[]) {
         s8_print(r);
         printf("\n");
     }
+
+    // send_i64(&c_ptr, 'C');
+    // r = recv_s8(&perm, &c_ptr);
+    // s8_print(r);
+    // printf("\n");
+
+    // for (u8 c = 0; c < 'z' - 'a'; c++) {
+    //     s8 key = { .buf = &c, .len = 1, };
+
+    //     send_i64(&c_ptr, 'G');
+    //     send_s8(&c_ptr, key);
+    //     r = recv_s8(&perm, &c_ptr);
+    //     s8_print(r);
+    //     printf("\n");
+    // }
 
     // switch (command) {
     // case 'S': {

@@ -22,89 +22,91 @@ typedef struct {
     int timeout;
 } CacheVal;
 
-typedef struct Cache Cache;
-typedef struct Cache {
-    Cache *child[4];
+typedef struct CacheItem CacheItem;
+typedef struct CacheItem {
+    ssize child[4];
     bool deleted;
     s8 key;
     CacheVal val;
-} Cache;
+} CacheItem;
 
 typedef struct {
-    Cache **cache;
-} ConnectionData;
+    List(CacheItem) set;
+} Cache;
 
-Cache *cache_upsert(Cache **c, s8 key, bool make) {
-    Cache **least_deleted = 0;
+ssize cache_upsert_index(Cache *cache, s8 key, bool make) {
+    ssize least_deleted = -1, node = 0, parent = 0;
+    u64 i = 0;
 
-    for (u64 h = s8_hash(key); *c; h <<= 2) {
-        if ((*c)->deleted) {
-            if (!least_deleted) least_deleted = c;
-        } else if (s8_equals(key, (*c)->key)) return *c;
-        c = &(*c)->child[h>>62];
+    bool initial = true;
+    for (u64 h = s8_hash(key); (node || initial) && cache->set.len; h <<= 2) {
+        initial = false;
+        CacheItem *c = &cache->set.buf[node];
+
+        if (c->deleted) {
+            if (least_deleted < 0) least_deleted = node;
+        } else if (s8_equals(key, c->key)) return node;
+
+        parent = node;
+        i = h >> 62;
+        node = c->child[i];
     }
 
-    if (!make) return 0;
-    if (least_deleted) c = least_deleted;
-    else *c = new(0, Cache, 1);
-    (*c)->key = s8_copy(0, key);
-    (*c)->deleted = false;
+    if (!make) return -1;
 
-    return *c;
+    if (least_deleted >= 0) node = least_deleted;
+    else {
+        list_push(&cache->set, (CacheItem) {0});
+        node = cache->set.len - 1;
+    }
+
+    cache->set.buf[parent].child[i] = node;
+
+    CacheItem *c = &cache->set.buf[node];
+    c->key = s8_copy(0, key);
+    c->val = (CacheVal) {0};
+    c->deleted = false;
+
+    return node;
 }
 
-int cache_delete(Cache **c, s8 key) {
-    Cache *e = cache_upsert(c, key, false);
-    if (!e) return -1;
+CacheItem *cache_upsert(Cache *cache, s8 key, bool make) {
+    ssize node = cache_upsert_index(cache, key, make);
+    if (node < 0) return 0;
+    return &cache->set.buf[node];
+}
 
-    free(e->key.buf);
-    free(e->val.str.buf);
-    e->key = (s8) {0};
-    e->val = (CacheVal) {0};
+int cache_delete(Cache *cache, s8 key) {
+    ssize node = cache_upsert_index(cache, key, false);
+    if (node < 0) return -1;
+    CacheItem *c = &cache->set.buf[node];
 
-    e->deleted = true;
+    free(c->key.buf);
+    free(c->val.str.buf);
+    c->key = (s8) {0};
+    c->val = (CacheVal) {0};
+    c->deleted = true;
+
+    return 0;
+}
+
+int cache_clear_all(Cache *cache) {
+    for (int i = 0; i < cache->set.len; i++) {
+        CacheItem *c = &cache->set.buf[i];
+        free(c->key.buf);
+        free(c->val.str.buf);
+    }
+
+    free(cache->set.buf);
+    cache->set.buf = 0;
+    cache->set.len = 0;
 
     return 0;
 }
 
 typedef struct {
-    Cache *c;
-    int n;
-} CacheStackItem;
-
-void cache_clear_all(Cache **c) {
-    if (!(*c)) return;
-
-    List(CacheStackItem) stack = { .cap = 128, };
-
-    list_push(&stack, (CacheStackItem) { .c = *c, });
-
-    while (stack.len) {
-        CacheStackItem *item = &list_last(&stack);
-
-        for (int i = item->n; i < arrlen(item->c->child); i++) {
-            item->n += 1;
-
-            if (item->c->child[i]) {
-                list_push(&stack, (CacheStackItem) { .c = item->c->child[i], });
-                goto continue_loop;
-            }
-        }
-
-        free(item->c->key.buf);
-        free(item->c->val.str.buf);
-        free(item->c);
-        stack.len -= 1;
-
-continue_loop:
-        continue;
-    }
-
-    *c = 0;
-
-    free(stack.buf);
-    stack.buf = 0;
-}
+    Cache *cache;
+} ConnectionData;
 
 void connection_main() {
     Connection *c = (Connection *) aco_get_arg();
@@ -123,8 +125,8 @@ void connection_main() {
                val = recv_s8(&val_arena, &c);
             if (c->status) goto end;
 
-            Cache *entry = cache_upsert(data->cache, key, 1);
-            entry->val = (CacheVal) { .str = val, .timeout = timeout, };
+            CacheItem *item = cache_upsert(data->cache, key, 1);
+            item->val = (CacheVal) { .str = val, .timeout = timeout, };
 
             send_s8(&c, s8("OK."));
         } break;
@@ -132,9 +134,9 @@ void connection_main() {
             s8 key = recv_s8(&key_arena, &c);
             if (c->status) goto end;
 
-            Cache *entry = cache_upsert(data->cache, key, 0);
+            CacheItem *item = cache_upsert(data->cache, key, 0);
 
-            if (entry) send_s8(&c, entry->val.str);
+            if (item) send_s8(&c, item->val.str);
             else send_err(&c, s8("Error: No such key."));
         } break;
         case 'D': {
@@ -153,11 +155,14 @@ void connection_main() {
             s8 key = recv_s8(&key_arena, &c);
             if (c->status) goto end;
 
-            Cache *entry = cache_upsert(data->cache, key, 1);
-            entry->val.timeout = timeout;
+            CacheItem *item = cache_upsert(data->cache, key, 1);
+            item->val.timeout = timeout;
 
             send_s8(&c, s8("OK."));
         } break;
+        default: {
+            send_s8(&c, s8("Error: No such command."));
+        }
         }
 
         key_arena.len = val_arena.len = 0;
@@ -171,10 +176,6 @@ end:
 }
 
 int main() {
-    Cache cache_t = {0};
-    Cache *cache_ptr = &cache_t;
-    printf("%ld\n", arrlen(cache_ptr->child));
-
     aco_thread_init(0);
 
     Server server = {
@@ -186,7 +187,7 @@ int main() {
     printf("Server is running on localhost:%d\n", server.port);
     s8_write_to_file(s8("port.txt"), u64_to_s8(0, server.port, 0));
 
-    Cache *cache = 0;
+    Cache cache = { .set.cap = 128, };
 
     while (1) {
         int count = epoll_wait(
@@ -195,6 +196,9 @@ int main() {
             server.epoll.len,
             -1
         );
+
+        // TODO: see about epoll flags
+        // TODO: make get_conn_id function
 
         for (int i = 0; i < count; i++) {
             u64 conn_id = server.epoll.events[i].data.u64;
@@ -210,6 +214,7 @@ int main() {
             } else if (events & EPOLLIN) {
                 Connection *c = &server.cs.buf[conn_id];
                 aco_resume(c->co);
+                // TODO: see if c->status should silently fail some of the time
                 if (c->status || c->co->is_end) {
                     on_disconnect(&server, conn_id);
                     printf("Bye! See ya on the other side.\n");
@@ -222,3 +227,18 @@ int main() {
 
     return 0;
 }
+
+/* TODO:
+   [x]: Efficient and correct networking
+   [ ]: "Get/set/delete" commands
+   [ ]: "Clear all" command
+   [ ]: Delete key on timeout
+   [ ]: Clear everything on timeout
+   [ ]: FreeBSD support
+   [ ]: Publish program to ports
+   [ ]: Encryption / password lock
+   [ ]: Chroot stuff
+   [ ]: Configuration
+   [ ]: Bind address
+   [ ]: Max memory behavior
+*/ 
