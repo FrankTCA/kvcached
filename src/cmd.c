@@ -8,11 +8,40 @@
 #define ARGP_IMPL
 #include "argp.h"
 
+#define SET       "set"
+#define SET_U     "<timeout> <key> <value>"
+#define SET_D     "Sets with a timeout (see the timeout command) " \
+                  "the key to the value "
+
+#define GET       "get"
+#define GET_U     "<key>"
+#define GET_D     "Prints the value of the given key."
+
+#define DELETE    "delete"
+#define DELETE_U  "<key>"
+#define DELETE_D  "Deletes the given key."
+
+#define CLEAR     "clear"
+#define CLEAR_U   ""
+#define CLEAR_D   "Clears the cache."
+
+#define TIMEOUT   "timeout"
+#define TIMEOUT_U "<key> <seconds>"
+#define TIMEOUT_D "Sets the timeout of the given key. Every time a key " \
+                  "is accessed, the timer on that key is reset. " \
+                  "If the timer ends, the key will be deleted. " \
+                  "A timeout of zero disables the timer."
+
 void usage_err(ArgParser a) {
     fprintf(stderr, "Usage: %s <port> ", a.argv[0]);
     s8_fprint(stderr, a.extra_usage);
     fprintf(stderr, "\n");
-    fprintf(stderr, "Try '%s --help' for more information.\n", a.argv[0]);
+    fprintf(stderr, "Commands:\n");
+    fprintf(stderr, "    \"" SET " " SET_U "\" - " SET_D "\n");
+    fprintf(stderr, "    \"" GET " " GET_U "\" - " GET_D "\n");
+    fprintf(stderr, "    \"" DELETE " " DELETE_U "\" - " DELETE_D "\n");
+    fprintf(stderr, "    \"" CLEAR " " CLEAR_U "\" - " CLEAR_D "\n");
+    fprintf(stderr, "    \"" TIMEOUT " " TIMEOUT_U "\" - " TIMEOUT_D "\n");
     exit(1);
 }
 
@@ -37,18 +66,6 @@ Connection connect_to_localhost(u16 port) {
 }
 
 int main(int argc, char *argv[]) {
-    if ((strcmp(argv[1], "--help") == 0) || (strcmp(argv[1], "-h") == 0)) {
-        printf("Usage: %s <port> <command> <parameters>\n\n", argv[0]);
-        printf("--------------------------\n");
-        printf("Commands:\n\n");
-        printf("S <key> [value] -- Saves value to kvcached. If no value specified reads from stdin.\n");
-        printf("G <key> -- Prints value of key to stdout.\n");
-        printf("D <key> -- Deletes the key and unloads from memory.\n");
-        printf("C -- Clears cache.\n");
-        printf("T <key> <seconds> -- Set timeout in seconds when key will be automatically deleted.\n");
-        return 0;
-    }
-
     ArgParser argp = {
         .argc = argc, .argv = argv,
         .i = 1,
@@ -56,141 +73,60 @@ int main(int argc, char *argv[]) {
         .usage_err = usage_err,
     };
 
-    // u8 command;
     u16 port;
     {
         s8 p = get_next_arg(&argp);
-        port = atoi((char *) p.buf);
+        port = s8_to_u64(p);
+        if (port == 0) argp.usage_err(argp);
     }
 
-    s8 r = (s8) {0};
+    s8 command = get_next_arg(&argp);
 
     Arena perm = new_arena(2 * KiB);
 
-    Connection c = connect_to_localhost(port);
-    Connection *c_ptr = &c;
+    Connection _conn = connect_to_localhost(port);
+    Connection *conn = &_conn;
 
-    for (u8 c = 0; c < 'z' - 'a'; c++) {
-        s8 key = { .buf = &c, .len = 1, };
+    if (s8_equals(command, s8(SET))) {
+        argp.extra_usage = s8(SET " " SET_U);
+        u64 timeout = s8_to_u64(get_next_arg(&argp));
+        s8 key = get_next_arg(&argp);
+        s8 val = get_next_arg(&argp);
+            send_i64(&conn, 'S');
+            send_i64(&conn, timeout);
+            send_s8(&conn, key);
+            send_s8(&conn, val);
+        no_more_args(argp);
+    } else if (s8_equals(command, s8(GET))) {
+        argp.extra_usage = s8(GET " " GET_U);
+        s8 key = get_next_arg(&argp);
+            send_i64(&conn, 'G');
+            send_s8(&conn, key);
+        no_more_args(argp);
+    } else if (s8_equals(command, s8(DELETE))) {
+        argp.extra_usage = s8(DELETE " " DELETE_U);
+        s8 key = get_next_arg(&argp);
+            send_i64(&conn, 'D');
+            send_s8(&conn, key);
+        no_more_args(argp);
+    } else if (s8_equals(command, s8(CLEAR))) {
+        argp.extra_usage = s8(CLEAR " " CLEAR_U);
+            send_i64(&conn, 'C');
+        no_more_args(argp);
+    } else if (s8_equals(command, s8(TIMEOUT))) {
+        argp.extra_usage = s8(TIMEOUT " " TIMEOUT_U);
+        u64 timeout = s8_to_u64(get_next_arg(&argp));
+        s8 key = get_next_arg(&argp);
+            send_i64(&conn, 'T');
+            send_i64(&conn, timeout);
+            send_s8(&conn, key);
+        no_more_args(argp);
+    } else argp.usage_err(argp);
 
-        u8 v = c + 'a';
-        s8 val = { .buf = &v, .len = 1, };
-
-        send_i64(&c_ptr, 'S');
-        send_i64(&c_ptr, 0);
-        send_s8(&c_ptr, key);
-        send_s8(&c_ptr, val);
-        r = recv_s8(&perm, &c_ptr);
-        s8_print(r);
-        printf("\n");
-    }
-
-    for (u8 c = 0; c < 'z' - 'a'; c++) {
-        s8 key = { .buf = &c, .len = 1, };
-
-        send_i64(&c_ptr, 'G');
-        send_s8(&c_ptr, key);
-        r = recv_s8(&perm, &c_ptr);
-        s8_print(r);
-        printf("\n");
-    }
-
-    // send_i64(&c_ptr, 'C');
-    // r = recv_s8(&perm, &c_ptr);
-    // s8_print(r);
-    // printf("\n");
-
-    // for (u8 c = 0; c < 'z' - 'a'; c++) {
-    //     s8 key = { .buf = &c, .len = 1, };
-
-    //     send_i64(&c_ptr, 'G');
-    //     send_s8(&c_ptr, key);
-    //     r = recv_s8(&perm, &c_ptr);
-    //     s8_print(r);
-    //     printf("\n");
-    // }
-
-    // switch (command) {
-    // case 'S': {
-    //     argp.extra_usage = s8("S <key> [value]");
-
-    //     s8 key = get_next_arg(&argp);
-
-    //     s8 val = {0};
-    //     if (argp.i == argp.argc) {
-    //         val = s8_copy(&scratch, val);
-    //         u8 ch = 0;
-    //         while (read(STDIN_FILENO, &ch, 1)) {
-    //             s8_modcat(&scratch, &val, (s8) { .len = 1, .buf = &ch, });
-    //         }
-    //     }
-    //     else val = get_next_arg(&argp);
-
-    //     no_more_args(argp);
-
-    //     sock = connect_to_localhost(port);
-    //     send_buf(sock, &command, sizeof(command));
-    //     send_s8(sock, key);
-    //     send_s8(sock, val);
-    // } break;
-    // case 'G': {
-    //     argp.extra_usage = s8("G <key>");
-
-    //     s8 key = get_next_arg(&argp);
-    //     no_more_args(argp);
-
-    //     sock = connect_to_localhost(port);
-    //     send_buf(sock, &command, sizeof(command));
-    //     send_s8(sock, key);
-    // } break;
-    // case 'D': {
-    //     argp.extra_usage = s8("D <key>");
-
-    //     s8 key = get_next_arg(&argp);
-    //     no_more_args(argp);
-
-    //     sock = connect_to_localhost(port);
-    //     send_buf(sock, &command, sizeof(command));
-    //     send_s8(sock, key);
-    // } break;
-    // case 'C': {
-    //     argp.extra_usage = s8("C");
-
-    //     no_more_args(argp);
-
-    //     sock = connect_to_localhost(port);
-    //     send_buf(sock, &command, sizeof(command));
-    // } break;
-    // case 'T': {
-    //     argp.extra_usage = s8("T <key> <seconds>");
-
-    //     s8 key = get_next_arg(&argp);
-    //     s8 time = get_next_arg(&argp);
-
-    //     no_more_args(argp);
-
-    //     sock = connect_to_localhost(port);
-    //     send_buf(sock, &command, sizeof(command));
-    //     send_s8(sock, key);
-    //     send_s8(sock, time);
-    // } break;
-    // default: {
-    //     fprintf(stderr, "Error: Unrecognized command.\n");
-    //     usage_err(argp);
-    // }
-    // }
-
-    // int status = 0;
-    // s8 msg = recv_s8(NULL, sock, &status);
-    // if (status != 0) {
-    //     fprintf(stderr, "Error: Error when receiving server response.\n");
-    //     exit(1);
-    // }
-    // if (msg.len < 0) {
-    //     msg.len *= -1;
-    //     s8_fprint(stderr, msg);
-    // }
-    // else s8_print(msg);
+    Arena a = new_arena(12 * GiB);
+    s8 r = recv_s8(&a, &conn);
+    s8_print(r);
+    printf("\n");
 
     return 0;
 }
