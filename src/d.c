@@ -17,9 +17,11 @@
 #define DS_IMPL
 #include "ds.h"
 
+#include <time.h>
+
 typedef struct {
     s8 str;
-    int timeout;
+    u64 timeout, last_accessed;
 } CacheVal;
 
 typedef struct CacheItem CacheItem;
@@ -76,16 +78,19 @@ CacheItem *cache_upsert(Cache *cache, s8 key, bool make) {
     return &cache->set.buf[node];
 }
 
-int cache_delete(Cache *cache, s8 key) {
-    ssize node = cache_upsert_index(cache, key, false);
-    if (node < 0) return -1;
-    CacheItem *c = &cache->set.buf[node];
-
+void cache_delete_item(CacheItem *c) {
     free(c->key.buf);
     free(c->val.str.buf);
     c->key = (s8) {0};
     c->val = (CacheVal) {0};
     c->deleted = true;
+}
+
+int cache_delete(Cache *cache, s8 key) {
+    ssize node = cache_upsert_index(cache, key, false);
+    if (node < 0) return -1;
+
+    cache_delete_item(&cache->set.buf[node]);
 
     return 0;
 }
@@ -126,7 +131,11 @@ void connection_main() {
             if (c->status) goto end;
 
             CacheItem *item = cache_upsert(data->cache, key, 1);
-            item->val = (CacheVal) { .str = val, .timeout = timeout, };
+            item->val = (CacheVal) {
+                .str = val,
+                .timeout = timeout,
+                .last_accessed = time(0),
+            };
 
             send_s8(&c, s8("OK."));
         } break;
@@ -136,8 +145,10 @@ void connection_main() {
 
             CacheItem *item = cache_upsert(data->cache, key, 0);
 
-            if (item) send_s8(&c, item->val.str);
-            else send_err(&c, s8("Error: No such key."));
+            if (item) {
+                send_s8(&c, item->val.str);
+                item->val.last_accessed = time(0);
+            } else send_err(&c, s8("Error: No such key."));
         } break;
         case 'D': {
             s8 key = recv_s8(&key_arena, &c);
@@ -156,9 +167,10 @@ void connection_main() {
             if (c->status) goto end;
 
             CacheItem *item = cache_upsert(data->cache, key, 1);
-            item->val.timeout = timeout;
-
-            send_s8(&c, s8("OK."));
+            if (item) {
+                item->val.timeout = timeout;
+                send_s8(&c, s8("OK."));
+            } else send_err(&c, s8("Error: No such key."));
         } break;
         default: {
             send_s8(&c, s8("Error: No such command."));
@@ -194,8 +206,23 @@ int main() {
             server.epoll.fd,
             server.epoll.events,
             server.epoll.len,
-            -1
+            1000 // 1 second
         );
+
+        bool alive = 0;
+        for (int i = 0; i < cache.set.len; i++) {
+            CacheItem *c = &cache.set.buf[i];
+
+            if (c->deleted) continue;
+            alive = true;
+            if (!c->val.timeout) continue;
+
+            if (time(NULL) - c->val.last_accessed >= c->val.timeout) {
+                cache_delete_item(c);
+            }
+        }
+
+        if (!alive) cache_clear_all(&cache);
 
         // TODO: see about epoll flags
         // TODO: make get_conn_id function
@@ -230,9 +257,9 @@ int main() {
 
 /* TODO:
    [x]: Efficient and correct networking
-   [ ]: "Get/set/delete" commands
-   [ ]: "Clear all" command
-   [ ]: Delete key on timeout
+   [x]: "Get/set/delete" commands
+   [x]: "Clear all" command
+   [x]: Delete key on timeout
    [ ]: Clear everything on timeout
    [ ]: FreeBSD support
    [ ]: Publish program to ports
