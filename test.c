@@ -1,20 +1,24 @@
 #define EVENT_IMPL
+#define EVENT_DETECT_PLATFORM
 #include "src/event.h"
 
 #include "src/ds.h"
 
 void event_handle_error(EventManager *e) {
-    if (e->err.str) {
+    if (e->err.str[0]) {
         fprintf(stderr, "src/event.h:%ld: Error: %s\n", e->err.line, e->err.str);
         exit(1);
     }
 }
 
 int main() {
-    EventManager event_manager = new_event_manager();
-    event_handle_error(&event_manager);
+    EventManager event_manager = new_event_manager(1024);
+    event_manager.events = calloc(
+        event_manager.event_throughput_count,
+        sizeof(PlatformEvent)
+    );
 
-    event_add_read_fd(&event_manager, 0);
+    event_add_fd(&event_manager, 0, EVENT_FLAG_READ);
     event_handle_error(&event_manager);
 
     while (1) {
@@ -22,28 +26,25 @@ int main() {
         event_handle_error(&event_manager);
 
         for (int i = 0; i < count; i++) {
-            int fd = event_get_fd(&event_manager, i);
+            PolledEvent event = get_polled_event(&event_manager, i);
 
-            if (event_has_error(&event_manager, i)) continue;
-            if (!event_is_readable(&event_manager, i)) continue;
+            if (event.is_terminated) continue;
+            if (!event.is_readable) continue;
 
             char buf[256];
-            ssize_t n = read(fd, buf, arrlen(buf) - 1);
+            ssize_t n = read(event.fd, buf, arrlen(buf) - 1);
 
             if (n > 0) {
                 buf[n] = '\0';
-                printf("Received %zd bytes on FD %d: %s", n, fd, buf);
+                printf("Received %zd bytes on FD %d: %s", n, event.fd, buf);
             } else if (n == 0) {
                 printf("Bye!\n");
-                event_delete_fd(&event_manager, fd);
+                event_delete_fd(&event_manager, event.fd, EVENT_FLAG_READ);
                 event_handle_error(&event_manager);
                 exit(0);
             } else {
-                // Read error
                 perror("read error");
             }
-
-            // void *udata = event_manager.events[i].udata;
         }
     }
 
