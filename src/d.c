@@ -202,12 +202,7 @@ int main() {
     Cache cache = { .set.cap = 128, };
 
     while (1) {
-        int count = epoll_wait(
-            server.epoll.fd,
-            server.epoll.events,
-            server.epoll.len,
-            1000 // 1 second
-        );
+        int count = event_wait(&server.event_manager, EVENT_SECOND_US);
 
         bool alive = 0;
         for (int i = 0; i < cache.set.len; i++) {
@@ -228,17 +223,17 @@ int main() {
         // TODO: make get_conn_id function
 
         for (int i = 0; i < count; i++) {
-            u64 conn_id = server.epoll.events[i].data.u64;
-            u32 events = server.epoll.events[i].events;
+            PolledEvent event = get_polled_event(&server.event_manager, i);
+            u64 conn_id = (u64) event.data;
 
             if (conn_id == server.server_id) {
                 ConnectionData data = { .cache = &cache, };
                 on_connect(&server, connection_main, &data);
                 printf("We're launching off, partner.\n");
-            } else if (events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP)) {
+            } else if (event.is_terminated) {
                 on_disconnect(&server, conn_id);
                 printf("Goodbye! Maybe you'll see more next time.\n");
-            } else if (events & EPOLLIN) {
+            } else if (event.is_readable) {
                 Connection *c = &server.cs.buf[conn_id];
                 aco_resume(c->co);
                 // TODO: see if c->status should silently fail some of the time
@@ -250,7 +245,7 @@ int main() {
         }
     }
 
-    if (close(server.epoll.fd)) err("Failed to close epoll file descriptor.");
+    event_manager_close(&server.event_manager);
 
     return 0;
 }
@@ -261,7 +256,7 @@ int main() {
    [x]: "Clear all" command
    [x]: Delete key on timeout
    [ ]: Clear everything on timeout
-   [ ]: FreeBSD support
+   [x]: FreeBSD support
    [ ]: Publish program to ports
    [ ]: Encryption / password lock
    [ ]: Chroot stuff

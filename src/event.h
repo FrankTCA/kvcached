@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
+#include <stddef.h>
 
 #include <unistd.h>
 
@@ -49,20 +50,27 @@ typedef struct {
 } PolledEvent;
 
 typedef struct {
-    size_t event_throughput_count;
+    size_t event_throughput;
     PlatformEvent *events;
     struct {
         size_t line;
         char str[EVENT_MAX_ERR_STR_LEN];
     } err;
     int fd;
+    struct {
+        char *buf;
+        size_t cap;
+    } mem;
 } EventManager;
 
-size_t new_event_manager(EventManager *e, int event_throughput_count);
+ptrdiff_t new_event_manager(EventManager *e, int event_throughput);
+int new_event_manager_alloc(EventManager *e, int throughput, void *(*alloc)(size_t));
+void event_use_memory(EventManager *e);
 int event_add_fd(EventManager *e, int fd, EventFlags flags, void *data);
+int event_change_data(EventManager *e, int fd, EventFlags flags, void *data);
 int event_wait(EventManager *e, int timeout_us);
 int event_delete_fd(EventManager *e, int fd);
-int event_manager_close(EventManager *e);
+void event_manager_close(EventManager *e);
 PolledEvent get_polled_event(EventManager *e, size_t i);
 
 #endif // EVENT_H
@@ -71,8 +79,9 @@ PolledEvent get_polled_event(EventManager *e, size_t i);
 #ifndef EVENT_IMPL_GUARD
 #define EVENT_IMPL_GUARD
 
-size_t new_event_manager(EventManager *e, int event_throughput_count) {
-    e->event_throughput_count = event_throughput_count;
+ptrdiff_t new_event_manager(EventManager *e, int event_throughput) {
+    e->event_throughput = event_throughput;
+    e->mem.cap = event_throughput * sizeof(*e->events);
 
 #ifdef EVENT_USE_EPOLL
     e->fd = epoll_create1(0);
@@ -85,7 +94,21 @@ size_t new_event_manager(EventManager *e, int event_throughput_count) {
         return -1;
     }
 
-    return ret;
+    return e->mem.cap;
+}
+
+int new_event_manager_alloc(EventManager *e, int throughput, void *(*alloc)(size_t)) {
+    ptrdiff_t cap = new_event_manager(e, throughput);
+    if (cap < 0) return -1;
+    e->mem.buf = alloc(cap);
+    if (!e->mem.buf) return -1;
+    memset(e->mem.buf, 0, cap);
+    event_use_memory(e);
+    return 0;
+}
+
+void event_use_memory(EventManager *e) {
+    e->events = (PlatformEvent *) e->mem.buf;
 }
 
 int event_add_fd(EventManager *e, int fd, EventFlags flags, void *data) {
@@ -97,7 +120,6 @@ int event_add_fd(EventManager *e, int fd, EventFlags flags, void *data) {
 
     struct epoll_event event = {
         .events = eflags,
-        .data.fd = fd,
         .data.ptr = data,
     };
 
@@ -138,6 +160,61 @@ int event_add_fd(EventManager *e, int fd, EventFlags flags, void *data) {
         }
     }
 #endif
+
+    return 0;
+}
+
+int event_change_data(EventManager *e, int fd, EventFlags flags, void *data) {
+#ifdef EVENT_USE_EPOLL
+    uint32_t eflags  = 0;
+
+    if (flags & EVENT_FLAG_READ) eflags |= EPOLLIN;
+    if (flags & EVENT_FLAG_WRITE) eflags |= EPOLLOUT;
+
+    struct epoll_event event = {
+        .events = eflags,
+        .data.ptr = data, 
+    };
+
+    if (epoll_ctl(e->fd, EPOLL_CTL_MOD, fd, &event) == -1) {
+        _event_set_error(e);
+        return -1;
+    }
+#elif EVENT_USE_KQUEUE
+    if (flags & EVENT_FLAG_READ) {
+        struct kevent k = {0};
+        EV_SET(
+            &k,
+            fd,
+            EVFILT_READ,
+            EV_ADD | EV_ENABLE,
+            0, 0, data
+        );
+
+        if (kevent(e->fd, &k, 1, NULL, 0, NULL) == -1) {
+            _event_set_error(e);
+            return -1;
+        }
+    }
+
+    if (flags & EVENT_FLAG_WRITE) {
+        struct kevent k = {0};
+        EV_SET(
+            &k,
+            fd,
+            EVFILT_WRITE,
+            EV_ADD | EV_ENABLE,
+            0, 0, data
+        );
+
+        if (kevent(e->fd, &k, 1, NULL, 0, NULL) == -1) {
+            _event_set_error(e);
+            return -1;
+        }
+    }
+#endif
+
+    return 0;
 }
 
 int event_wait(EventManager *e, int timeout_us) {
@@ -146,7 +223,7 @@ int event_wait(EventManager *e, int timeout_us) {
     int count = epoll_wait(
         e->fd,
         e->events,
-        e->event_throughput_count,
+        e->event_throughput,
         timeout_ms
     );
 #elif EVENT_USE_KQUEUE
@@ -159,7 +236,7 @@ int event_wait(EventManager *e, int timeout_us) {
         NULL, 
         0,
         e->events,
-        e->event_throughput_count,
+        e->event_throughput,
         &timeout
     );
 #endif
@@ -186,17 +263,19 @@ int event_delete_fd(EventManager *e, int fd) {
         return -1;
     }
 #endif
+
+    return 0;
 }
 
 void event_manager_close(EventManager *e) {
-    if (e->fd >= 0) {
+    if (e->fd > 0) {
         close(e->fd);
         e->fd = 0;
     }
 }
 
 PolledEvent get_polled_event(EventManager *e, size_t i) {
-    if (i >= e->event_throughput_count) {
+    if (i >= e->event_throughput) {
         return (PolledEvent) { .fd = -1, };
     }
 

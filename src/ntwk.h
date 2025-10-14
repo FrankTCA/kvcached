@@ -19,7 +19,9 @@
 #ifndef NTWK_BLOCKING
 #include <libaco/aco.h>
 #include <libaco/aco_assert_override.h>
-#include <sys/epoll.h>
+
+#define EVENT_DETECT_PLATFORM
+#include "event.h"
 #endif
 
 #include "ds.h"
@@ -53,11 +55,7 @@ typedef struct {
 #ifndef NTWK_BLOCKING
     u64 server_id;
     ConnectionSet cs;
-    struct {
-        int fd;
-        ssize len;
-        struct epoll_event *events;
-    } epoll;
+    EventManager event_manager;
     aco_t *main_co; // If this not null, it's preserved upon new_server(...)
     aco_share_stack_t *share_stack; // Same as above
 #endif
@@ -88,6 +86,11 @@ void send_s8(Connection **c, s8 str);
 
 #define DS_IMPL
 #include "ds.h"
+
+#ifndef NTWK_BLOCKING
+#define EVENT_IMPL
+#include "event.h"
+#endif
 
 void new_server(Server *s, i32 server_id) {
     assert(server_id < 0);
@@ -132,24 +135,14 @@ void new_server(Server *s, i32 server_id) {
     s->cs = (ConnectionSet) { .cap = 64, };
     s->cs.buf = calloc(s->cs.cap, sizeof(*s->cs.buf));
 
-    s->epoll.fd = epoll_create1(0);
-    // TODO: handle errors
-    if (s->epoll.fd == -1) err("Failed to create epoll file descriptor.");
+    new_event_manager_alloc(&s->event_manager, 1024, malloc); // TODO: handle errors
 
-    {
-        s->epoll.len = old.epoll.len ? old.epoll.len : 128;
-        s->epoll.events = calloc(s->epoll.len, sizeof(*s->epoll.events));
-
-        struct epoll_event e = {
-            .events = EPOLLIN | EPOLLET,
-            .data.u64 = server_id,
-        };
-        if (epoll_ctl(s->epoll.fd, EPOLL_CTL_ADD, s->sock, &e)) {
-            // TODO: handle errors
-            err("Failed to add file descriptor to epoll.");
-        }
-    }
-
+    event_add_fd(
+        &s->event_manager,
+        s->sock,
+        EVENT_FLAG_READ,
+        (void *) s->server_id
+    );
 
     int flags = fcntl(s->sock, F_GETFL, 0);
     fcntl(s->sock, F_SETFL, flags | O_NONBLOCK);
@@ -174,9 +167,13 @@ void on_connect(Server *s, aco_cofuncp_t cofn, void *data) {
         c->co = aco_create(s->main_co, s->share_stack, 0, cofn, c);
         c->data = data;
 
-        struct epoll_event e = { .events = EPOLLIN | EPOLLOUT | EPOLLET, };
-        e.data.u64 = s->cs.len;
-        epoll_ctl(s->epoll.fd, EPOLL_CTL_ADD, c->sock, &e);
+        event_add_fd(
+            &s->event_manager,
+            c->sock,
+            EVENT_FLAG_READ,
+            (void *) s->cs.len
+        );
+
         fcntl(c->sock, F_SETFL, O_NONBLOCK);
 
         s->cs.len += 1;
@@ -187,10 +184,7 @@ bool on_disconnect(Server *s, u64 conn_id) {
     bool ret = 0;
     Connection *c = &s->cs.buf[conn_id];
 
-    if (epoll_ctl(s->epoll.fd, EPOLL_CTL_DEL, c->sock, NULL) == -1) {
-        // TODO: deal with errors
-        // warning("Failed to remove socket %d from epoll.", c->sock);
-    }
+    event_delete_fd(&s->event_manager, c->sock);
 
     ret = ret || close(c->sock);
 
@@ -201,15 +195,12 @@ bool on_disconnect(Server *s, u64 conn_id) {
         *c = *last_c;
         c->co->arg = c;
 
-        struct epoll_event e = {
-            .events = EPOLLIN | EPOLLOUT | EPOLLET, // same as on_connect
-            .data.u64 = conn_id,
-        };
-
-        if (epoll_ctl(s->epoll.fd, EPOLL_CTL_MOD, c->sock, &e)) {
-            // TODO: deal with errors
-            // err("Failed to modify epoll data for swapped connection.");
-        }
+        event_change_data(
+            &s->event_manager,
+            c->sock,
+            EVENT_FLAG_READ | EVENT_FLAG_WRITE,
+            (void *) conn_id)
+        ;
     }
 
     s->cs.len -= 1;
