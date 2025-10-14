@@ -13,6 +13,7 @@
 #else
 #define EVENT_USE_KQUEUE
 #endif
+#endif
 
 #ifndef EVENT_MAX_ERR_STR_LEN
 #define EVENT_MAX_ERR_STR_LEN 256
@@ -57,11 +58,11 @@ typedef struct {
     int fd;
 } EventManager;
 
-EventManager new_event_manager(int event_throughput_count);
-void event_add_fd(EventManager *e, int fd, EventFlags flags);
+size_t new_event_manager(EventManager *e, int event_throughput_count);
+int event_add_fd(EventManager *e, int fd, EventFlags flags, void *data);
 int event_wait(EventManager *e, int timeout_us);
-void event_delete_fd(EventManager *e, int fd);
-void event_manager_close(EventManager *e);
+int event_delete_fd(EventManager *e, int fd);
+int event_manager_close(EventManager *e);
 PolledEvent get_polled_event(EventManager *e, size_t i);
 
 #endif // EVENT_H
@@ -70,25 +71,24 @@ PolledEvent get_polled_event(EventManager *e, size_t i);
 #ifndef EVENT_IMPL_GUARD
 #define EVENT_IMPL_GUARD
 
-EventManager new_event_manager(int event_throughput_count) {
-    EventManager ret = {0};
-    ret.event_throughput_count = event_throughput_count;
+size_t new_event_manager(EventManager *e, int event_throughput_count) {
+    e->event_throughput_count = event_throughput_count;
 
 #ifdef EVENT_USE_EPOLL
-    ret.fd = epoll_create1(0);
+    e->fd = epoll_create1(0);
 #elif EVENT_USE_KQUEUE
-    ret.fd = kqueue();
+    e->fd = kqueue();
 #endif
 
-    if (ret.fd < 0) {
-        _event_set_error(&ret);
-        return ret;
+    if (e->fd < 0) {
+        _event_set_error(e);
+        return -1;
     }
 
     return ret;
 }
 
-void event_add_fd(EventManager *e, int fd, EventFlags flags, void *data) {
+int event_add_fd(EventManager *e, int fd, EventFlags flags, void *data) {
 #ifdef EVENT_USE_EPOLL
     uint32_t eflags  = 0;
 
@@ -103,6 +103,7 @@ void event_add_fd(EventManager *e, int fd, EventFlags flags, void *data) {
 
     if (epoll_ctl(e->fd, EPOLL_CTL_ADD, fd, &event) == -1) {
         _event_set_error(e);
+        return -1;
     }
 #elif EVENT_USE_KQUEUE
     if (flags & EVENT_FLAG_READ) {
@@ -115,7 +116,10 @@ void event_add_fd(EventManager *e, int fd, EventFlags flags, void *data) {
             0, 0, data
         );
 
-        if (kevent(e->fd, &k, 1, NULL, 0, NULL) == -1) _event_set_error(e);
+        if (kevent(e->fd, &k, 1, NULL, 0, NULL) == -1) {
+            _event_set_error(e);
+            return -1;
+        }
     }
 
     if (flags & EVENT_FLAG_WRITE) {
@@ -128,7 +132,10 @@ void event_add_fd(EventManager *e, int fd, EventFlags flags, void *data) {
             0, 0, data
         );
 
-        if (kevent(e->fd, &k, 1, NULL, 0, NULL) == -1) _event_set_error(e);
+        if (kevent(e->fd, &k, 1, NULL, 0, NULL) == -1) {
+            _event_set_error(e);
+            return -1;
+        }
     }
 #endif
 }
@@ -142,10 +149,6 @@ int event_wait(EventManager *e, int timeout_us) {
         e->event_throughput_count,
         timeout_ms
     );
-    if (count < 0) {
-        _event_set_error(e);
-    }
-    return count;
 #elif EVENT_USE_KQUEUE
     struct timespec timeout = {
         .tv_sec = timeout_us / EVENT_SECOND_US,
@@ -159,15 +162,20 @@ int event_wait(EventManager *e, int timeout_us) {
         e->event_throughput_count,
         &timeout
     );
-    if (count < 0) _event_set_error(e);
-    return count;
 #endif
+
+    if (count < 0) {
+        _event_set_error(e);
+        return -1;
+    }
+    return count;
 }
 
-void event_delete_fd(EventManager *e, int fd) {
+int event_delete_fd(EventManager *e, int fd) {
 #ifdef EVENT_USE_EPOLL
     if (epoll_ctl(e->fd, EPOLL_CTL_DEL, fd, NULL) == -1) { 
         _event_set_error(e);
+        return -1;
     }
 #elif EVENT_USE_KQUEUE
     struct kevent k = {0};
@@ -175,6 +183,7 @@ void event_delete_fd(EventManager *e, int fd) {
     EV_SET(&k, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
     if (kevent(e->fd, &k, 1, NULL, 0, NULL) < 0) {
         _event_set_error(e);
+        return -1;
     }
 #endif
 }
